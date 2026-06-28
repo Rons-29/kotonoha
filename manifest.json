@@ -1,8 +1,8 @@
 {
   "id": "kotonoha",
   "name": "Kotonoha",
-  "version": "1.0.4",
-  "minAppVersion": "1.5.0",
+  "version": "1.0.5",
+  "minAppVersion": "1.13.0",
   "description": "言の葉を日々のノートに残すメモタイムライン.",
   "author": "Rons-29",
   "authorUrl": "https://github.com/Rons-29",
