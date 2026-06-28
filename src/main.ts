@@ -1,0 +1,1635 @@
+import {
+	App,
+	ItemView,
+	MarkdownRenderer,
+	Notice,
+	Plugin,
+	PluginSettingTab,
+	Setting,
+	TFile,
+	WorkspaceLeaf,
+	moment,
+	normalizePath
+} from "obsidian";
+
+const VIEW_TYPE_LOCAL_THINO = "kotonoha-view";
+const META_RE = /\s*%%\s*kotonoha:([^%]*)%%\s*/g;
+const META_LINE_RE = /^\s*%%\s*kotonoha:([^%]*)%%\s*$/;
+const MAX_MEMO_CONTENT_LENGTH = 20000;
+const MAX_PROTOCOL_CONTENT_LENGTH = 10000;
+const MAX_ATTACHMENT_FILES = 10;
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+type KotonohaSettings = {
+	memoFolder: string;
+	dailyNoteFolder: string;
+	dailyNoteFileFormat: string;
+	dateFormat: string;
+	timeFormat: string;
+	captureToDailyNote: boolean;
+	dailyHeading: string;
+	insertNewMemoAtTop: boolean;
+	dailyGoal: number;
+	randomReviewCount: number;
+	heatmapDays: number;
+	showAdvancedControls: boolean;
+	attachmentFolder: string;
+	saveButtonLabel: string;
+	draftContent: string;
+	draftTaskCapture: boolean;
+	draftSaveTarget: SaveTarget;
+};
+
+type MemoStatus = "active" | "archived" | "deleted";
+type StatusFilter = "active" | "all" | "archived" | "deleted";
+type DateFilter = "all" | "today" | "week" | "month" | "custom";
+type TaskFilter = "all" | "memo" | "open" | "done";
+type TaskStatus = "none" | "open" | "done";
+type SaveTarget = "default" | "daily" | "monthly";
+type ViewLayout = "list" | "compact" | "grid";
+type DailyNotesSettings = { folder?: string; format?: string; template?: string };
+type AttachmentSaveResult = { links: string[]; paths: string[] };
+
+type MemoItem = {
+	id: string;
+	storageId: string | null;
+	filePath: string;
+	startLine: number;
+	endLine: number;
+	timestampText: string;
+	createdAt: string;
+	createdTime: number;
+	content: string;
+	tags: string[];
+	status: MemoStatus;
+	pinned: boolean;
+	taskStatus: TaskStatus;
+};
+
+const DEFAULT_SETTINGS: KotonohaSettings = {
+	memoFolder: "Kotonoha",
+	dailyNoteFolder: "",
+	dailyNoteFileFormat: "YYYY-MM-DD",
+	dateFormat: "YYYY-MM-DD",
+	timeFormat: "HH:mm",
+	captureToDailyNote: true,
+	dailyHeading: "つぶやき",
+	insertNewMemoAtTop: false,
+	dailyGoal: 5,
+	randomReviewCount: 10,
+	heatmapDays: 42,
+	showAdvancedControls: false,
+	attachmentFolder: "Kotonoha/attachments",
+	saveButtonLabel: "残す",
+	draftContent: "",
+	draftTaskCapture: false,
+	draftSaveTarget: "default",
+};
+
+export default class KotonohaPlugin extends Plugin {
+	settings: KotonohaSettings = DEFAULT_SETTINGS;
+	dailyNotesSettings: DailyNotesSettings | null = null;
+
+	async onload() {
+		await this.loadSettings();
+		this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
+
+		this.registerView(
+			VIEW_TYPE_LOCAL_THINO,
+			(leaf) => new KotonohaView(leaf, this)
+		);
+
+		this.addRibbonIcon("message-square-plus", "Kotonoha を開く", () => {
+			this.activateView();
+		});
+
+		this.addCommand({
+			id: "open",
+			name: "メモタイムラインを開く",
+			callback: () => this.activateView(),
+		});
+
+		this.addCommand({
+			id: "capture-selection",
+			name: "選択範囲をメモタイムラインに保存",
+			editorCallback: async (editor) => {
+				const selected = editor.getSelection().trim();
+				if (!selected) {
+					new Notice("選択中のテキストがありません。");
+					return;
+				}
+				await this.captureMemo(selected);
+			},
+		});
+
+		this.addCommand({
+			id: "random-review",
+			name: "ランダムにメモを表示",
+			callback: async () => {
+				await this.activateView();
+				this.getOpenViews().forEach((view) => view.pickRandomMemo());
+			},
+		});
+
+		this.registerObsidianProtocolHandler("kotonoha", async (params) => {
+			await this.handleProtocolCapture(params);
+		});
+
+		this.addSettingTab(new KotonohaSettingTab(this.app, this));
+	}
+
+	async activateView() {
+		this.app.workspace
+			.getLeavesOfType(VIEW_TYPE_LOCAL_THINO)
+			.forEach((existingLeaf) => existingLeaf.detach());
+
+		const leaf = this.app.workspace.getLeaf("tab");
+		await leaf.setViewState({ type: VIEW_TYPE_LOCAL_THINO, active: true });
+		this.app.workspace.revealLeaf(leaf);
+	}
+
+	async loadSettings() {
+		const loaded = await this.loadData();
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...loaded,
+			dailyHeading: normalizeHeadingText(loaded?.dailyHeading ?? DEFAULT_SETTINGS.dailyHeading),
+			dailyNoteFolder: normalizeOptionalFolder(loaded?.dailyNoteFolder ?? DEFAULT_SETTINGS.dailyNoteFolder),
+			dailyNoteFileFormat: (loaded?.dailyNoteFileFormat ?? DEFAULT_SETTINGS.dailyNoteFileFormat).trim() || DEFAULT_SETTINGS.dailyNoteFileFormat,
+			dailyGoal: normalizePositiveInteger(loaded?.dailyGoal, DEFAULT_SETTINGS.dailyGoal),
+			randomReviewCount: normalizePositiveInteger(loaded?.randomReviewCount, DEFAULT_SETTINGS.randomReviewCount),
+			heatmapDays: normalizePositiveInteger(loaded?.heatmapDays, DEFAULT_SETTINGS.heatmapDays),
+			attachmentFolder: normalizeFolder(loaded?.attachmentFolder ?? DEFAULT_SETTINGS.attachmentFolder),
+			saveButtonLabel: normalizeButtonLabel(loaded?.saveButtonLabel, DEFAULT_SETTINGS.saveButtonLabel),
+			draftContent: typeof loaded?.draftContent === "string" ? loaded.draftContent : "",
+			draftTaskCapture: loaded?.draftTaskCapture === true,
+			draftSaveTarget: normalizeSaveTarget(loaded?.draftSaveTarget),
+		};
+	}
+
+	async saveSettings() {
+		await this.saveData(this.settings);
+	}
+
+	async captureMemo(rawContent: string) {
+		await this.captureMemoToTarget(rawContent, "default");
+	}
+
+	async saveAttachments(files: File[]): Promise<AttachmentSaveResult> {
+		if (files.length === 0) return { links: [], paths: [] };
+		if (files.length > MAX_ATTACHMENT_FILES) {
+			throw new Error(`添付できるファイルは一度に${MAX_ATTACHMENT_FILES}個までです。`);
+		}
+
+		const folder = normalizeFolder(this.settings.attachmentFolder);
+		await ensureFolder(this.app, folder);
+		const links: string[] = [];
+		const paths: string[] = [];
+
+		try {
+			for (const file of files) {
+				if (file.size > MAX_ATTACHMENT_BYTES) {
+					throw new Error(`添付ファイルは1つ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MBまでです。`);
+				}
+				const path = this.getAvailableAttachmentPath(folder, sanitizeAttachmentName(file.name));
+				await this.app.vault.createBinary(path, await file.arrayBuffer());
+				paths.push(path);
+				links.push(`![[${path}]]`);
+			}
+		} catch (error) {
+			await this.deleteAttachments(paths);
+			throw error;
+		}
+
+		return { links, paths };
+	}
+
+	async deleteAttachments(paths: string[]) {
+		for (const path of paths) {
+			const file = this.app.vault.getAbstractFileByPath(path);
+			if (file instanceof TFile) {
+				await this.app.vault.delete(file);
+			}
+		}
+	}
+
+	getAvailableAttachmentPath(folder: string, fileName: string): string {
+		const dotIndex = fileName.lastIndexOf(".");
+		const base = dotIndex > 0 ? fileName.slice(0, dotIndex) : fileName;
+		const extension = dotIndex > 0 ? fileName.slice(dotIndex) : "";
+		let path = `${folder}/${fileName}`;
+		let index = 2;
+
+		while (this.app.vault.getAbstractFileByPath(path)) {
+			path = `${folder}/${base}-${index}${extension}`;
+			index += 1;
+		}
+
+		return path;
+	}
+
+	async captureMemoToTarget(rawContent: string, target: SaveTarget, forcedTaskStatus?: TaskStatus): Promise<boolean> {
+		const content = rawContent.trim();
+		if (!content) {
+			new Notice("メモが空です。");
+			return false;
+		}
+		if (content.length > MAX_MEMO_CONTENT_LENGTH) {
+			new Notice(`メモが長すぎます。${MAX_MEMO_CONTENT_LENGTH}文字以内にしてください。`);
+			return false;
+		}
+
+		try {
+			if (target === "daily" || (target === "default" && this.settings.captureToDailyNote)) {
+				await this.appendToDailyNote(content, forcedTaskStatus);
+			} else {
+				await this.appendToMonthlyMemoFile(content, forcedTaskStatus);
+			}
+		} catch (error) {
+			new Notice(error instanceof Error ? `保存できませんでした: ${error.message}` : "保存できませんでした。");
+			return false;
+		}
+
+		new Notice("Kotonoha に保存しました。");
+		this.refreshOpenViews();
+		return true;
+	}
+
+	async handleProtocolCapture(params: Record<string, string | "true">) {
+		const content = (params.text || params.content || params.body || "").toString().trim();
+		if (!content) {
+			new Notice("URL から保存するメモ本文がありません。");
+			return;
+		}
+		if (content.length > MAX_PROTOCOL_CONTENT_LENGTH) {
+			new Notice(`URL から保存できる本文は${MAX_PROTOCOL_CONTENT_LENGTH}文字までです。`);
+			return;
+		}
+
+		const target = normalizeSaveTarget(params.target?.toString());
+		const taskStatus = normalizeTaskStatus(params.task?.toString());
+		await this.captureMemoToTarget(content, target, taskStatus);
+
+		if (params.open === "true" || params.open === "1") {
+			await this.activateView();
+		}
+	}
+
+	async appendToMonthlyMemoFile(content: string, forcedTaskStatus?: TaskStatus) {
+		const folder = normalizeFolder(this.settings.memoFolder);
+		await ensureFolder(this.app, folder);
+		const path = `${folder}/${moment().format("YYYY-MM")}.md`;
+		const file = await getOrCreateFile(this.app, path, `# ${moment().format("YYYY-MM")}\n\n`);
+		const line = this.formatMemoLine(content, true, forcedTaskStatus);
+		await this.app.vault.append(file, `${line}\n`);
+	}
+
+	async appendToDailyNote(content: string, forcedTaskStatus?: TaskStatus) {
+		const dailyNote = await this.resolveDailyNote();
+		const file = await getOrCreateFile(this.app, dailyNote.path, dailyNote.initialContent);
+		const raw = await this.app.vault.read(file);
+		const updated = upsertUnderHeading(raw, this.settings.dailyHeading, this.formatMemoLine(content, false, forcedTaskStatus), this.settings.insertNewMemoAtTop);
+		await this.app.vault.modify(file, updated);
+	}
+
+	async resolveDailyNote(): Promise<{ path: string; initialContent: string }> {
+		const dailyNotes = await loadCoreDailyNotesSettings(this.app);
+		this.dailyNotesSettings = dailyNotes;
+		const format = (dailyNotes?.format || this.settings.dailyNoteFileFormat || DEFAULT_SETTINGS.dailyNoteFileFormat).trim();
+		const folder = normalizeOptionalFolder(dailyNotes?.folder ?? this.settings.dailyNoteFolder);
+		const fileName = moment().format(format || DEFAULT_SETTINGS.dailyNoteFileFormat);
+		const path = folder ? `${folder}/${fileName}.md` : `${fileName}.md`;
+		await ensureParentFolder(this.app, path);
+
+		const title = fileName.split("/").pop() || fileName;
+		const templateContent = await this.readDailyNoteTemplate(dailyNotes?.template);
+		const initialContent = templateContent !== null
+			? applyTemplateVariables(templateContent, title)
+			: `# ${title}\n\n`;
+
+		return { path, initialContent: ensureTrailingNewline(initialContent) };
+	}
+
+	async readDailyNoteTemplate(templatePath: string | undefined): Promise<string | null> {
+		if (!templatePath) return null;
+		const normalizedPath = templatePath.endsWith(".md") ? templatePath : `${templatePath}.md`;
+		const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+		if (!(file instanceof TFile)) return null;
+		return this.app.vault.read(file);
+	}
+
+	formatMemoLine(content: string, includeDate: boolean, forcedTaskStatus?: TaskStatus): string {
+		const date = includeDate ? `${moment().format(this.settings.dateFormat || DEFAULT_SETTINGS.dateFormat)} ` : "";
+		const time = moment().format(this.settings.timeFormat || DEFAULT_SETTINGS.timeFormat);
+		const parsed = extractTaskInput(content);
+		const escaped = parsed.content.replace(/\n/g, "\n  ");
+		const taskStatus = forcedTaskStatus ?? parsed.taskStatus;
+		const checkbox = taskStatus === "open" ? "[ ] " : taskStatus === "done" ? "[x] " : "";
+		return serializeMemoBlock(generateMemoId(), `${date}${time}`.trim(), escaped, "active", false, taskStatus);
+	}
+
+	async loadMemos(): Promise<MemoItem[]> {
+		const files = this.getSourceFiles();
+		const all = await Promise.all(files.map((file) => this.loadMemosFromFile(file)));
+		return all.flat().sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdTime - a.createdTime || b.id.localeCompare(a.id));
+	}
+
+	getSourceFiles(): TFile[] {
+		const files = this.app.vault.getMarkdownFiles();
+		const fallbackFolder = normalizeFolder(this.settings.memoFolder);
+		if (!this.settings.captureToDailyNote) {
+			return files.filter((file) => file.path.startsWith(`${fallbackFolder}/`));
+		}
+
+		const dailyFolder = normalizeOptionalFolder(this.dailyNotesSettings?.folder ?? this.settings.dailyNoteFolder);
+		const dailyFormat = this.dailyNotesSettings?.format ?? this.settings.dailyNoteFileFormat;
+		if (dailyFolder) return files.filter((file) => file.path.startsWith(`${dailyFolder}/`));
+		return files.filter((file) => isLikelyDailyNotePath(file.path, dailyFormat));
+	}
+
+	async loadMemosFromFile(file: TFile): Promise<MemoItem[]> {
+		const raw = await this.app.vault.read(file);
+		return parseMemoItems(
+			raw,
+			file.path,
+			this.settings.captureToDailyNote ? this.settings.dailyHeading : null
+		);
+	}
+
+	async updateMemoContent(memo: MemoItem, content: string) {
+		if (await this.replaceMemoBlock(memo, content.trim(), memo.status, memo.pinned, memo.taskStatus, "メモを更新しました。")) {
+			this.refreshOpenViews();
+		}
+	}
+
+	async updateMemoStatus(memo: MemoItem, status: MemoStatus) {
+		const label = status === "archived" ? "アーカイブしました。" : status === "deleted" ? "ゴミ箱に移動しました。" : "復元しました。";
+		if (await this.replaceMemoBlock(memo, memo.content, status, memo.pinned, memo.taskStatus, label)) {
+			this.refreshOpenViews();
+		}
+	}
+
+	async updateMemoPinned(memo: MemoItem, pinned: boolean) {
+		if (await this.replaceMemoBlock(memo, memo.content, memo.status, pinned, memo.taskStatus, pinned ? "ピン留めしました。" : "ピン留めを解除しました。")) {
+			this.refreshOpenViews();
+		}
+	}
+
+	async updateMemoTaskStatus(memo: MemoItem, taskStatus: TaskStatus) {
+		const label = taskStatus === "done" ? "タスクを完了にしました。" : taskStatus === "open" ? "タスクを未完了にしました。" : "タスク扱いを解除しました。";
+		if (await this.replaceMemoBlock(memo, memo.content, memo.status, memo.pinned, taskStatus, label)) {
+			this.refreshOpenViews();
+		}
+	}
+
+	async deleteMemoPermanently(memo: MemoItem) {
+		const file = this.app.vault.getAbstractFileByPath(memo.filePath);
+		if (!(file instanceof TFile)) return;
+		let deletedBlock: string[] = [];
+		let deletedStartLine = 0;
+		try {
+			await this.app.vault.process(file, (raw) => {
+				const target = findCurrentMemo(raw, memo, this.settings.captureToDailyNote ? this.settings.dailyHeading : null);
+				if (!target) throw new Error("対象のメモを安全に特定できませんでした。再読み込みしてから試してください。");
+				const lines = raw.split(/\r?\n/);
+				deletedStartLine = target.startLine;
+				deletedBlock = lines.slice(target.startLine, target.endLine + 1);
+				lines.splice(target.startLine, target.endLine - target.startLine + 1);
+				return lines.join("\n");
+			});
+			this.showUndoNotice("メモを完全に削除しました。", async () => {
+				await this.app.vault.process(file, (raw) => {
+					const blockText = deletedBlock.join("\n");
+					if (raw.includes(blockText)) return raw;
+					const lines = raw.split(/\r?\n/);
+					lines.splice(Math.min(deletedStartLine, lines.length), 0, ...deletedBlock);
+					return lines.join("\n");
+				});
+			});
+			this.refreshOpenViews();
+		} catch (error) {
+			new Notice(error instanceof Error ? error.message : "メモを削除できませんでした。");
+		}
+	}
+
+	async replaceMemoBlock(memo: MemoItem, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus, successMessage: string): Promise<boolean> {
+		if (!content) {
+			new Notice("メモが空です。");
+			return false;
+		}
+		const file = this.app.vault.getAbstractFileByPath(memo.filePath);
+		if (!(file instanceof TFile)) return false;
+		let previousBlock: string[] = [];
+		let updatedStorageId = "";
+		try {
+			await this.app.vault.process(file, (raw) => {
+				const target = findCurrentMemo(raw, memo, this.settings.captureToDailyNote ? this.settings.dailyHeading : null);
+				if (!target) throw new Error("対象のメモを安全に特定できませんでした。再読み込みしてから試してください。");
+				const lines = raw.split(/\r?\n/);
+				const storageId = target.storageId ?? memo.storageId ?? generateMemoId();
+				updatedStorageId = storageId;
+				previousBlock = lines.slice(target.startLine, target.endLine + 1);
+				const nextBlock = serializeMemoBlock(storageId, target.timestampText, content, status, pinned, taskStatus).split("\n");
+				lines.splice(target.startLine, target.endLine - target.startLine + 1, ...nextBlock);
+				return lines.join("\n");
+			});
+			this.showUndoNotice(successMessage, async () => {
+				await this.app.vault.process(file, (raw) => {
+					const current = parseMemoItems(
+						raw,
+						memo.filePath,
+						this.settings.captureToDailyNote ? this.settings.dailyHeading : null
+					).find((candidate) => candidate.storageId === updatedStorageId);
+					if (!current) throw new Error("Undo対象のメモが見つかりません。");
+					const lines = raw.split(/\r?\n/);
+					lines.splice(current.startLine, current.endLine - current.startLine + 1, ...previousBlock);
+					return lines.join("\n");
+				});
+			});
+			return true;
+		} catch (error) {
+			new Notice(error instanceof Error ? error.message : "メモを更新できませんでした。");
+			return false;
+		}
+	}
+
+	showUndoNotice(message: string, undo: () => Promise<void>) {
+		const notice = new Notice(message, 7000);
+		const undoButton = notice.noticeEl.createEl("button", { text: "元に戻す" });
+		undoButton.addEventListener("click", async () => {
+			try {
+				await undo();
+				notice.hide();
+				this.refreshOpenViews();
+				new Notice("元に戻しました。");
+			} catch (error) {
+				new Notice(error instanceof Error ? error.message : "元に戻せませんでした。");
+			}
+		});
+	}
+
+	refreshOpenViews() {
+		this.getOpenViews().forEach((view) => void view.reload());
+	}
+
+	getOpenViews(): KotonohaView[] {
+		return this.app.workspace
+			.getLeavesOfType(VIEW_TYPE_LOCAL_THINO)
+			.map((leaf) => leaf.view)
+			.filter((view): view is KotonohaView => view instanceof KotonohaView);
+	}
+}
+
+class KotonohaView extends ItemView {
+	plugin: KotonohaPlugin;
+	memos: MemoItem[] = [];
+	query = "";
+	activeTag = "";
+	statusFilter: StatusFilter = "active";
+	dateFilter: DateFilter = "all";
+	taskFilter: TaskFilter = "all";
+	selectedDate = "";
+	randomMemoIds = new Set<string>();
+	saveTarget: SaveTarget = "default";
+	viewLayout: ViewLayout = "list";
+	taskCapture = false;
+	attachmentFiles: File[] = [];
+	inputEl: HTMLTextAreaElement | null = null;
+	searchEl: HTMLInputElement | null = null;
+	draftSaveTimer: number | null = null;
+
+	constructor(leaf: WorkspaceLeaf, plugin: KotonohaPlugin) {
+		super(leaf);
+		this.plugin = plugin;
+	}
+
+	getViewType() {
+		return VIEW_TYPE_LOCAL_THINO;
+	}
+
+	getDisplayText() {
+		return "Kotonoha";
+	}
+
+	getIcon() {
+		return "message-square-plus";
+	}
+
+	async onOpen() {
+		this.containerEl.empty();
+		this.containerEl.addClass("kotonoha-view");
+		await this.render();
+		await this.reload();
+	}
+
+	async onClose() {
+		if (this.draftSaveTimer !== null) window.clearTimeout(this.draftSaveTimer);
+		await this.persistDraft();
+	}
+
+	async reload() {
+		this.memos = await this.plugin.loadMemos();
+		await this.renderList();
+	}
+
+	async render() {
+		const root = this.containerEl;
+		root.empty();
+		root.addClass("kotonoha-view");
+
+		const header = root.createDiv({ cls: "kotonoha-header" });
+		const title = header.createDiv();
+		title.createEl("h2", { text: "Kotonoha" });
+		title.createEl("p", { text: "言の葉を日々のノートに残す" });
+
+		this.searchEl = null;
+
+		if (this.plugin.settings.showAdvancedControls) {
+			const search = root.createEl("input", {
+				cls: "kotonoha-search",
+				attr: { type: "search", placeholder: "検索" },
+			});
+			this.searchEl = search;
+			search.addEventListener("input", () => {
+				this.query = search.value.trim().toLowerCase();
+				this.clearRandomReview();
+				void this.renderList();
+			});
+
+			const controls = root.createDiv({ cls: "kotonoha-control-stack" });
+
+			this.renderSegmented(this.createControlRow(controls, "状態"), [
+				["active", "通常"],
+				["all", "すべて"],
+				["archived", "アーカイブ"],
+				["deleted", "ゴミ箱"],
+			] as [StatusFilter, string][], (value) => {
+				this.statusFilter = value;
+				this.clearRandomReview();
+				void this.renderList();
+			}, "status");
+
+			this.renderSegmented(this.createControlRow(controls, "期間"), [
+				["all", "全期間"],
+				["today", "今日"],
+				["week", "7日"],
+				["month", "30日"],
+			] as [DateFilter, string][], (value) => {
+				this.dateFilter = value;
+				if (value !== "custom") this.selectedDate = "";
+				this.clearRandomReview();
+				void this.renderList();
+			}, "date");
+
+			this.renderSegmented(this.createControlRow(controls, "種類"), [
+				["all", "メモ+タスク"],
+				["memo", "メモのみ"],
+				["open", "未完了"],
+				["done", "完了"],
+			] as [TaskFilter, string][], (value) => {
+				this.taskFilter = value;
+				this.clearRandomReview();
+				void this.renderList();
+			}, "task");
+
+			this.renderSegmented(this.createControlRow(controls, "表示"), [
+				["list", "詳細リスト"],
+				["compact", "圧縮"],
+				["grid", "カードグリッド"],
+			] as [ViewLayout, string][], (value) => {
+				this.viewLayout = value;
+				void this.renderList();
+			}, "layout");
+
+			root.createDiv({ cls: "kotonoha-stats" });
+			root.createDiv({ cls: "kotonoha-progress" });
+			root.createDiv({ cls: "kotonoha-heatmap" });
+			root.createDiv({ cls: "kotonoha-context" });
+			root.createDiv({ cls: "kotonoha-tags" });
+		}
+		root.createDiv({ cls: "kotonoha-list" });
+		this.renderCapture(root);
+		this.registerViewShortcuts(root);
+	}
+
+	renderCapture(root: HTMLElement) {
+		const capture = root.createDiv({ cls: "kotonoha-capture" });
+		const input = capture.createEl("textarea", {
+			cls: "kotonoha-input",
+			attr: { placeholder: "いま残したいことを書く。[ ] で未完了、[x] で完了。" },
+		});
+		this.inputEl = input;
+		input.value = this.plugin.settings.draftContent;
+		this.taskCapture = this.plugin.settings.draftTaskCapture;
+		this.saveTarget = this.plugin.settings.draftSaveTarget;
+
+		const actions = capture.createDiv({ cls: "kotonoha-actions" });
+		const taskButton = actions.createEl("button", { text: "タスク" });
+		const attachButton = actions.createEl("button", { text: "添付" });
+		const saveButton = actions.createEl("button", { text: this.plugin.settings.saveButtonLabel, cls: "kotonoha-primary-button" });
+		const fileInput = capture.createEl("input", {
+			cls: "kotonoha-file-input",
+			attr: { type: "file", multiple: "true" },
+		});
+
+		const updateCaptureButtons = () => {
+			taskButton.toggleClass("is-active", this.taskCapture);
+			attachButton.setText(this.attachmentFiles.length > 0 ? `添付 ${this.attachmentFiles.length}` : "添付");
+		};
+
+		const saveCapture = async () => {
+			try {
+				const attachments = await this.plugin.saveAttachments(this.attachmentFiles);
+				const content = [input.value.trim(), ...attachments.links].filter(Boolean).join("\n");
+				const saved = await this.plugin.captureMemoToTarget(content, this.saveTarget, this.taskCapture ? "open" : undefined);
+				if (!saved) {
+					await this.plugin.deleteAttachments(attachments.paths);
+					return;
+				}
+				input.value = "";
+				this.attachmentFiles = [];
+				fileInput.value = "";
+				this.taskCapture = false;
+				await this.clearDraft();
+				updateCaptureButtons();
+			} catch (error) {
+				new Notice(error instanceof Error ? `添付を保存できませんでした: ${error.message}` : "添付を保存できませんでした。");
+			}
+		};
+
+		saveButton.addEventListener("click", () => void saveCapture());
+		taskButton.addEventListener("click", () => {
+			this.taskCapture = !this.taskCapture;
+			updateCaptureButtons();
+			this.scheduleDraftSave();
+			input.focus();
+		});
+		attachButton.addEventListener("click", () => fileInput.click());
+		fileInput.addEventListener("change", () => {
+			this.attachmentFiles = Array.from(fileInput.files ?? []);
+			updateCaptureButtons();
+		});
+		input.addEventListener("input", () => this.scheduleDraftSave());
+		input.addEventListener("keydown", async (event) => {
+			if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+				event.preventDefault();
+				await saveCapture();
+			}
+		});
+		updateCaptureButtons();
+
+		if (this.plugin.settings.showAdvancedControls) {
+			this.renderSegmented(this.createControlRow(capture, "保存先"), [
+				["default", "設定通り"],
+				["daily", "日次"],
+				["monthly", "月次"],
+			] as [SaveTarget, string][], (value) => {
+				this.saveTarget = value;
+				this.updateFilterButtonStates();
+				this.scheduleDraftSave();
+			}, "save");
+
+			const secondaryActions = capture.createDiv({ cls: "kotonoha-secondary-actions" });
+			secondaryActions.createEl("button", { text: "回顧" }).addEventListener("click", () => this.pickRandomMemo());
+			secondaryActions.createEl("button", { text: "表示分をコピー" }).addEventListener("click", () => void this.copyVisibleMemos());
+			secondaryActions.createEl("button", { text: "再読み込み" }).addEventListener("click", () => void this.reload());
+		}
+		capture.createDiv({ cls: "kotonoha-hint", text: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Cmd/Ctrl+Enter: 保存" });
+	}
+
+	scheduleDraftSave() {
+		if (this.draftSaveTimer !== null) window.clearTimeout(this.draftSaveTimer);
+		this.draftSaveTimer = window.setTimeout(() => {
+			this.draftSaveTimer = null;
+			void this.persistDraft();
+		}, 300);
+	}
+
+	async persistDraft() {
+		this.plugin.settings.draftContent = this.inputEl?.value ?? this.plugin.settings.draftContent;
+		this.plugin.settings.draftTaskCapture = this.taskCapture;
+		this.plugin.settings.draftSaveTarget = this.saveTarget;
+		await this.plugin.saveSettings();
+	}
+
+	async clearDraft() {
+		if (this.draftSaveTimer !== null) {
+			window.clearTimeout(this.draftSaveTimer);
+			this.draftSaveTimer = null;
+		}
+		this.plugin.settings.draftContent = "";
+		this.plugin.settings.draftTaskCapture = false;
+		this.plugin.settings.draftSaveTarget = "default";
+		await this.plugin.saveSettings();
+	}
+
+	createControlRow(container: HTMLElement, label: string): HTMLElement {
+		const row = container.createDiv({ cls: "kotonoha-control-row" });
+		row.createDiv({ cls: "kotonoha-control-label", text: label });
+		return row.createDiv({ cls: "kotonoha-filters" });
+	}
+
+	renderSegmented<T extends string>(container: HTMLElement, options: [T, string][], onPick: (value: T) => void, group = "filter") {
+		for (const [value, label] of options) {
+			const button = container.createEl("button", { text: label, cls: "kotonoha-filter-button" });
+			button.dataset.value = value;
+			button.dataset.group = group;
+			button.addEventListener("click", () => onPick(value));
+		}
+	}
+
+	registerViewShortcuts(root: HTMLElement) {
+		root.tabIndex = 0;
+		this.registerDomEvent(root, "keydown", (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			const editingText = target?.tagName === "TEXTAREA" || target?.tagName === "INPUT";
+			if (event.key === "/" && !editingText) {
+				event.preventDefault();
+				this.searchEl?.focus();
+			}
+			if (event.key === "i" && !editingText) {
+				event.preventDefault();
+				this.inputEl?.focus();
+			}
+			if (event.key === "Escape") {
+				this.inputEl?.blur();
+				this.searchEl?.blur();
+			}
+		});
+	}
+
+	pickRandomMemo() {
+		const candidates = this.getFilteredMemos(false);
+		if (candidates.length === 0) {
+			new Notice("表示できるメモがありません。");
+			return;
+		}
+		const shuffled = [...candidates].sort(() => Math.random() - 0.5);
+		const count = Math.max(1, Math.min(this.plugin.settings.randomReviewCount, shuffled.length));
+		this.randomMemoIds = new Set(shuffled.slice(0, count).map((memo) => memo.id));
+		void this.renderList();
+	}
+
+	async renderList() {
+		const stats = this.containerEl.querySelector(".kotonoha-stats") as HTMLElement | null;
+		const progress = this.containerEl.querySelector(".kotonoha-progress") as HTMLElement | null;
+		const heatmap = this.containerEl.querySelector(".kotonoha-heatmap") as HTMLElement | null;
+		const context = this.containerEl.querySelector(".kotonoha-context") as HTMLElement | null;
+		const tagBar = this.containerEl.querySelector(".kotonoha-tags") as HTMLElement | null;
+		const list = this.containerEl.querySelector(".kotonoha-list") as HTMLElement;
+		if (!list) return;
+
+		this.updateFilterButtonStates();
+		if (stats) this.renderStats(stats);
+		if (progress) this.renderDailyProgress(progress);
+		if (heatmap) this.renderHeatmap(heatmap);
+		if (context) this.renderContext(context);
+		if (tagBar) this.renderTags(tagBar);
+		list.empty();
+		list.className = `kotonoha-list kotonoha-layout-${this.viewLayout}`;
+
+		const filtered = this.getFilteredMemos(true);
+
+		if (filtered.length === 0) {
+			list.createDiv({ cls: "kotonoha-empty", text: this.memos.length === 0 ? "メモはまだありません。" : "この条件に合うメモはありません。" });
+			return;
+		}
+
+		let currentDate = "";
+		for (const memo of filtered) {
+			const memoDate = memo.createdAt.slice(0, 10);
+			if (memoDate !== currentDate) {
+				currentDate = memoDate;
+				list.createDiv({
+					cls: "kotonoha-date-heading",
+					text: formatDateGroupLabel(memoDate),
+				});
+			}
+			await this.renderMemoCard(list, memo);
+		}
+	}
+
+	updateFilterButtonStates() {
+		this.containerEl.querySelectorAll(".kotonoha-filter-button").forEach((button) => {
+			const el = button as HTMLElement;
+			const group = el.dataset.group;
+			const active =
+				(group === "save" && el.dataset.value === this.saveTarget) ||
+				(group === "task" && el.dataset.value === this.taskFilter) ||
+				(group === "layout" && el.dataset.value === this.viewLayout) ||
+				(group === "status" && el.dataset.value === this.statusFilter) ||
+				(group === "date" && el.dataset.value === this.dateFilter);
+			el.toggleClass("is-active", active);
+		});
+	}
+
+	renderStats(stats: HTMLElement) {
+		stats.empty();
+		const active = this.memos.filter((memo) => memo.status === "active");
+		const todayStart = moment().startOf("day").valueOf();
+		const todayCount = active.filter((memo) => memo.createdTime >= todayStart).length;
+		const archivedCount = this.memos.filter((memo) => memo.status === "archived").length;
+		const deletedCount = this.memos.filter((memo) => memo.status === "deleted").length;
+		const openTaskCount = active.filter((memo) => memo.taskStatus === "open").length;
+		stats.createSpan({ text: `通常 ${active.length}` });
+		stats.createSpan({ text: `今日 ${todayCount}` });
+		stats.createSpan({ text: `アーカイブ ${archivedCount}` });
+		stats.createSpan({ text: `未完了 ${openTaskCount}` });
+		stats.createSpan({ text: `ゴミ箱 ${deletedCount}` });
+	}
+
+	renderContext(context: HTMLElement) {
+		context.empty();
+		const chips: { label: string; onClear?: () => void }[] = [];
+		if (this.dateFilter === "custom" && this.selectedDate) {
+			chips.push({
+				label: `${this.selectedDate} のメモ`,
+				onClear: () => {
+					this.dateFilter = "all";
+					this.selectedDate = "";
+					void this.renderList();
+				},
+			});
+		}
+		if (this.randomMemoIds.size > 0) {
+			chips.push({
+				label: `ランダム回顧 ${this.randomMemoIds.size}件`,
+				onClear: () => {
+					this.clearRandomReview();
+					void this.renderList();
+				},
+			});
+		}
+		if (this.activeTag) {
+			chips.push({
+				label: `タグ ${this.activeTag}`,
+				onClear: () => {
+					this.activeTag = "";
+					void this.renderList();
+				},
+			});
+		}
+
+		if (chips.length === 0) return;
+		for (const chip of chips) {
+			const button = context.createEl("button", { text: `${chip.label} ×`, cls: "kotonoha-context-chip" });
+			button.addEventListener("click", () => chip.onClear?.());
+		}
+	}
+
+	renderDailyProgress(progress: HTMLElement) {
+		progress.empty();
+		const goal = Math.max(1, this.plugin.settings.dailyGoal);
+		const today = moment().format("YYYY-MM-DD");
+		const count = this.memos.filter((memo) => memo.status === "active" && memo.createdAt.startsWith(today)).length;
+		const percent = Math.min(100, Math.round((count / goal) * 100));
+		const label = progress.createDiv({ cls: "kotonoha-progress-label" });
+		label.createSpan({ text: `今日の進捗 ${count}/${goal}` });
+		label.createSpan({ text: `${percent}%` });
+		const track = progress.createDiv({ cls: "kotonoha-progress-track" });
+		const bar = track.createDiv({ cls: "kotonoha-progress-bar" });
+		bar.style.width = `${percent}%`;
+	}
+
+	renderHeatmap(heatmap: HTMLElement) {
+		heatmap.empty();
+		const counts = this.getDailyCounts();
+		const max = Math.max(1, ...Array.from(counts.values()));
+		const days = Math.max(7, Math.min(120, this.plugin.settings.heatmapDays));
+		const start = moment().subtract(days - 1, "days").startOf("day");
+
+		for (let index = 0; index < days; index += 1) {
+			const day = start.clone().add(index, "days");
+			const key = day.format("YYYY-MM-DD");
+			const count = counts.get(key) ?? 0;
+			const level = count === 0 ? 0 : Math.max(1, Math.ceil((count / max) * 4));
+			const cell = heatmap.createEl("button", {
+				text: String(count || ""),
+				cls: `kotonoha-heatmap-cell level-${level}${this.selectedDate === key ? " is-active" : ""}`,
+				attr: { title: `${key}: ${count}件` },
+			});
+			cell.addEventListener("click", () => {
+				this.dateFilter = "custom";
+				this.selectedDate = key;
+				this.clearRandomReview();
+				void this.renderList();
+			});
+		}
+	}
+
+	getDailyCounts(): Map<string, number> {
+		const counts = new Map<string, number>();
+		for (const memo of this.memos) {
+			if (memo.status !== "active") continue;
+			const date = memo.createdAt.slice(0, 10);
+			counts.set(date, (counts.get(date) ?? 0) + 1);
+		}
+		return counts;
+	}
+
+	renderTags(tagBar: HTMLElement) {
+		tagBar.empty();
+		const visible = this.getFilteredMemos(false);
+		const tags = Array.from(new Set(visible.flatMap((memo) => memo.tags))).sort();
+		if (this.activeTag) {
+			tagBar.createEl("button", { text: "解除", cls: "kotonoha-tag is-active" }).addEventListener("click", () => {
+				this.activeTag = "";
+				this.clearRandomReview();
+				void this.renderList();
+			});
+		}
+		for (const tag of tags.slice(0, 40)) {
+			const tagEl = tagBar.createEl("button", {
+				text: tag,
+				cls: `kotonoha-tag${this.activeTag === tag ? " is-active" : ""}`,
+			});
+			tagEl.addEventListener("click", () => {
+				this.activeTag = this.activeTag === tag ? "" : tag;
+				this.clearRandomReview();
+				void this.renderList();
+			});
+		}
+	}
+
+	async renderMemoCard(list: HTMLElement, memo: MemoItem) {
+		const item = list.createDiv({ cls: `kotonoha-item kotonoha-status-${memo.status}` });
+		if (this.randomMemoIds.has(memo.id)) item.addClass("is-random-pick");
+		if (memo.pinned) item.addClass("is-pinned");
+
+		const meta = item.createDiv({ cls: "kotonoha-meta" });
+		meta.createSpan({ text: `${memo.pinned ? "固定 / " : ""}${formatMemoMetaTime(memo)}` });
+		if (this.plugin.settings.showAdvancedControls) {
+			const fileLink = meta.createEl("a", { text: memo.filePath });
+			fileLink.addEventListener("click", async (event) => {
+				event.preventDefault();
+				const file = this.plugin.app.vault.getAbstractFileByPath(memo.filePath);
+				if (file instanceof TFile) {
+					await this.plugin.app.workspace.getLeaf(false).openFile(file);
+				}
+			});
+		}
+
+		const contentRow = item.createDiv({ cls: `kotonoha-content-row kotonoha-task-${memo.taskStatus}` });
+		if (memo.taskStatus !== "none") {
+			const taskToggle = contentRow.createEl("button", {
+				text: memo.taskStatus === "done" ? "✓" : "□",
+				cls: "kotonoha-task-indicator",
+				attr: { title: memo.taskStatus === "done" ? "未完了に戻す" : "タスク完了" },
+			});
+			taskToggle.addEventListener("click", async () => {
+				await this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "done" ? "open" : "done");
+			});
+		}
+
+		const content = contentRow.createDiv({ cls: "kotonoha-content" });
+		await MarkdownRenderer.render(this.plugin.app, memo.content, content, memo.filePath, this);
+
+		const editBox = item.createEl("textarea", { cls: "kotonoha-edit-box" });
+		editBox.value = memo.content;
+		editBox.hide();
+
+		const actions = item.createDiv({ cls: "kotonoha-card-actions" });
+		const moreButton = actions.createEl("button", { text: "…" });
+		const detailActions = item.createDiv({ cls: "kotonoha-card-detail-actions" });
+		detailActions.hide();
+
+		const editButton = detailActions.createEl("button", { text: "編集" });
+		detailActions.createEl("button", { text: "コピー" }).addEventListener("click", async () => {
+			await copyText(formatMemoForExport(memo));
+			new Notice("メモをコピーしました。");
+		});
+		detailActions.createEl("button", { text: memo.pinned ? "ピン解除" : "ピン留め" }).addEventListener("click", async () => {
+			await this.plugin.updateMemoPinned(memo, !memo.pinned);
+		});
+		detailActions.createEl("button", { text: memo.taskStatus === "done" ? "未完了に戻す" : "タスク完了" }).addEventListener("click", async () => {
+			await this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "done" ? "open" : "done");
+		});
+		detailActions.createEl("button", { text: memo.taskStatus === "none" ? "タスク化" : "タスク解除" }).addEventListener("click", async () => {
+			await this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "none" ? "open" : "none");
+		});
+		const saveButton = actions.createEl("button", { text: "保存" });
+		const cancelButton = actions.createEl("button", { text: "キャンセル" });
+		saveButton.hide();
+		cancelButton.hide();
+
+		moreButton.addEventListener("click", () => {
+			detailActions.toggleClass("is-open", !detailActions.hasClass("is-open"));
+			if (detailActions.hasClass("is-open")) {
+				detailActions.show();
+				moreButton.setText("閉じる");
+			} else {
+				detailActions.hide();
+				moreButton.setText("…");
+			}
+		});
+
+		editButton.addEventListener("click", () => {
+			content.hide();
+			moreButton.hide();
+			detailActions.hide();
+			editBox.show();
+			saveButton.show();
+			cancelButton.show();
+			editBox.focus();
+		});
+		cancelButton.addEventListener("click", () => {
+			editBox.value = memo.content;
+			editBox.hide();
+			saveButton.hide();
+			cancelButton.hide();
+			content.show();
+			moreButton.show();
+		});
+		saveButton.addEventListener("click", async () => {
+			await this.plugin.updateMemoContent(memo, editBox.value);
+		});
+
+		if (memo.status !== "archived") {
+			detailActions.createEl("button", { text: "アーカイブ" }).addEventListener("click", async () => {
+				await this.plugin.updateMemoStatus(memo, "archived");
+			});
+		}
+		if (memo.status !== "active") {
+			detailActions.createEl("button", { text: "復元" }).addEventListener("click", async () => {
+				await this.plugin.updateMemoStatus(memo, "active");
+			});
+		}
+		if (memo.status !== "deleted") {
+			detailActions.createEl("button", { text: "ゴミ箱" }).addEventListener("click", async () => {
+				await this.plugin.updateMemoStatus(memo, "deleted");
+			});
+		} else {
+			detailActions.createEl("button", { text: "完全削除" }).addEventListener("click", async () => {
+				if (window.confirm("このメモを完全に削除しますか？")) {
+					await this.plugin.deleteMemoPermanently(memo);
+				}
+			});
+		}
+	}
+
+	getFilteredMemos(applyRandom: boolean): MemoItem[] {
+		const now = moment();
+		const since = this.dateFilter === "today"
+			? now.clone().startOf("day").valueOf()
+			: this.dateFilter === "week"
+				? now.clone().subtract(7, "days").startOf("day").valueOf()
+				: this.dateFilter === "month"
+					? now.clone().subtract(30, "days").startOf("day").valueOf()
+					: 0;
+
+		const filtered = this.memos.filter((memo) => {
+			const matchesStatus = this.statusFilter === "all" ? memo.status !== "deleted" : memo.status === this.statusFilter;
+			const matchesDate = since === 0 || memo.createdTime >= since;
+			const matchesSelectedDate = this.dateFilter !== "custom" || memo.createdAt.startsWith(this.selectedDate);
+			const matchesTask =
+				this.taskFilter === "all" ||
+				(this.taskFilter === "memo" && memo.taskStatus === "none") ||
+				(this.taskFilter === "open" && memo.taskStatus === "open") ||
+				(this.taskFilter === "done" && memo.taskStatus === "done");
+			const matchesQuery = !this.query || memo.content.toLowerCase().includes(this.query);
+			const matchesTag = !this.activeTag || memo.tags.includes(this.activeTag);
+			return matchesStatus && matchesDate && matchesSelectedDate && matchesTask && matchesQuery && matchesTag;
+		});
+
+		if (!applyRandom || this.randomMemoIds.size === 0) return filtered;
+		return filtered.filter((memo) => this.randomMemoIds.has(memo.id));
+	}
+
+	clearRandomReview() {
+		this.randomMemoIds.clear();
+	}
+
+	async copyVisibleMemos() {
+		const memos = this.getFilteredMemos(true);
+		if (memos.length === 0) {
+			new Notice("コピーできるメモがありません。");
+			return;
+		}
+		await copyText(memos.map(formatMemoForExport).join("\n"));
+		new Notice(`${memos.length}件のメモをコピーしました。`);
+	}
+}
+
+class KotonohaSettingTab extends PluginSettingTab {
+	plugin: KotonohaPlugin;
+
+	constructor(app: App, plugin: KotonohaPlugin) {
+		super(app, plugin);
+		this.plugin = plugin;
+	}
+
+	display() {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		containerEl.createEl("p", {
+			cls: "kotonoha-settings-lead",
+			text: "アイデア、タスク、短い記録をすばやく保存して管理します。",
+		});
+
+		const hero = containerEl.createDiv({ cls: "kotonoha-settings-hero" });
+		const heroText = hero.createDiv();
+		heroText.createEl("h3", { text: "Kotonoha" });
+		heroText.createEl("p", { text: "言の葉を日々のノートに残し、検索、タグ、回顧で見返せます。" });
+		hero.createEl("button", { text: "メモを開く" }).addEventListener("click", async () => {
+			await this.plugin.activateView();
+		});
+
+		new Setting(containerEl).setName("機能").setHeading();
+		const features = containerEl.createDiv({ cls: "kotonoha-settings-grid" });
+		createFeatureCard(features, "基本", "メモの保存、編集、削除、復元");
+		createFeatureCard(features, "保存", "保存先フォルダ、日次形式、見出し");
+		createFeatureCard(features, "表示", "検索、タグ、期間、状態フィルタ");
+		createFeatureCard(features, "エディタ", "選択範囲保存、複数行メモ");
+		createFeatureCard(features, "振り返り", "ヒートマップ、ランダム回顧、日次目標");
+		createFeatureCard(features, "添付", "ファイル保存、リンク追加");
+
+		new Setting(containerEl).setName("保存設定").setHeading();
+
+		new Setting(containerEl)
+			.setName("デイリーノートに保存")
+			.setDesc("有効にすると、指定したデイリーノートファイルの見出し下にメモを追加します。")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.captureToDailyNote)
+				.onChange(async (value) => {
+					this.plugin.settings.captureToDailyNote = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("デイリーノート保存先フォルダ")
+			.setDesc("Obsidian のデイリーノート設定がある場合はそちらを優先します。未設定時の fallback です。")
+			.addText((text) => text
+				.setPlaceholder("例: Daily, 01_diary")
+				.setValue(this.plugin.settings.dailyNoteFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.dailyNoteFolder = normalizeOptionalFolder(value);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("デイリーノートのファイル名")
+			.setDesc("Obsidian のデイリーノート設定がある場合はそちらを優先します。Moment.js 形式です。")
+			.addText((text) => text
+				.setPlaceholder("YYYY-MM-DD")
+				.setValue(this.plugin.settings.dailyNoteFileFormat)
+				.onChange(async (value) => {
+					this.plugin.settings.dailyNoteFileFormat = value.trim() || DEFAULT_SETTINGS.dailyNoteFileFormat;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("日次ノートの見出し")
+			.setDesc("# や ## は入力不要です。この見出しの下にメモを追加します。")
+			.addText((text) => text
+				.setPlaceholder("つぶやき")
+				.setValue(this.plugin.settings.dailyHeading)
+				.onChange(async (value) => {
+					this.plugin.settings.dailyHeading = normalizeHeadingText(value) || DEFAULT_SETTINGS.dailyHeading;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("新しいメモを上に追加")
+			.setDesc("有効にすると、見出しの直下に最新メモを追加します。無効の場合は末尾に追加します。")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.insertNewMemoAtTop)
+				.onChange(async (value) => {
+					this.plugin.settings.insertNewMemoAtTop = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("月次保存フォルダ")
+			.setDesc("デイリーノート保存を無効にした場合に使う、vault 内の相対フォルダです。")
+			.addText((text) => text
+				.setPlaceholder("Kotonoha")
+				.setValue(this.plugin.settings.memoFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.memoFolder = value.trim() || DEFAULT_SETTINGS.memoFolder;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("添付ファイル保存フォルダ")
+			.setDesc("Kotonoha から添付したファイルを保存する vault 内の相対フォルダです。")
+			.addText((text) => text
+				.setPlaceholder("Kotonoha/attachments")
+				.setValue(this.plugin.settings.attachmentFolder)
+				.onChange(async (value) => {
+					this.plugin.settings.attachmentFolder = normalizeFolder(value || DEFAULT_SETTINGS.attachmentFolder);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("保存ボタンの表示名")
+			.setDesc("下部入力欄の主ボタンに表示する短い言葉です。")
+			.addText((text) => text
+				.setPlaceholder("残す")
+				.setValue(this.plugin.settings.saveButtonLabel)
+				.onChange(async (value) => {
+					this.plugin.settings.saveButtonLabel = normalizeButtonLabel(value, DEFAULT_SETTINGS.saveButtonLabel);
+					await this.plugin.saveSettings();
+					for (const view of this.plugin.getOpenViews()) {
+						await view.render();
+						await view.reload();
+					}
+				}));
+
+		new Setting(containerEl).setName("表示設定").setHeading();
+
+		new Setting(containerEl)
+			.setName("詳細ツールを表示")
+			.setDesc("検索、絞り込み、統計、ヒートマップ、タグをタイムライン上部に表示します。無効時は書きやすさを優先します。")
+			.addToggle((toggle) => toggle
+				.setValue(this.plugin.settings.showAdvancedControls)
+				.onChange(async (value) => {
+					this.plugin.settings.showAdvancedControls = value;
+					await this.plugin.saveSettings();
+					for (const view of this.plugin.getOpenViews()) {
+						await view.render();
+						await view.reload();
+					}
+				}));
+
+		new Setting(containerEl).setName("振り返り設定").setHeading();
+
+		new Setting(containerEl)
+			.setName("1日の目標メモ数")
+			.setDesc("今日の進捗バーに使います。")
+			.addText((text) => text
+				.setPlaceholder("5")
+				.setValue(String(this.plugin.settings.dailyGoal))
+				.onChange(async (value) => {
+					this.plugin.settings.dailyGoal = normalizePositiveInteger(Number(value), DEFAULT_SETTINGS.dailyGoal);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("ランダム回顧の件数")
+			.setDesc("ランダムボタンで表示するメモ数です。")
+			.addText((text) => text
+				.setPlaceholder("10")
+				.setValue(String(this.plugin.settings.randomReviewCount))
+				.onChange(async (value) => {
+					this.plugin.settings.randomReviewCount = normalizePositiveInteger(Number(value), DEFAULT_SETTINGS.randomReviewCount);
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName("ヒートマップの日数")
+			.setDesc("タイムライン上部に表示する日数です。")
+			.addText((text) => text
+				.setPlaceholder("42")
+				.setValue(String(this.plugin.settings.heatmapDays))
+				.onChange(async (value) => {
+					this.plugin.settings.heatmapDays = normalizePositiveInteger(Number(value), DEFAULT_SETTINGS.heatmapDays);
+					await this.plugin.saveSettings();
+				}));
+	}
+}
+
+function createFeatureCard(container: HTMLElement, title: string, description: string) {
+	const card = container.createDiv({ cls: "kotonoha-settings-card" });
+	card.createDiv({ cls: "kotonoha-settings-card-icon", text: "•" });
+	const body = card.createDiv();
+	body.createEl("strong", { text: title });
+	body.createEl("p", { text: description });
+}
+
+async function ensureFolder(app: App, folder: string) {
+	if (app.vault.getAbstractFileByPath(folder)) return;
+	const parts = folder.split("/");
+	let current = "";
+	for (const part of parts) {
+		current = current ? `${current}/${part}` : part;
+		if (!app.vault.getAbstractFileByPath(current)) {
+			await app.vault.createFolder(current);
+		}
+	}
+}
+
+async function ensureParentFolder(app: App, path: string) {
+	const parent = path.split("/").slice(0, -1).join("/");
+	if (parent) await ensureFolder(app, parent);
+}
+
+async function getOrCreateFile(app: App, path: string, initialContent: string): Promise<TFile> {
+	const existing = app.vault.getAbstractFileByPath(path);
+	if (existing instanceof TFile) return existing;
+	return app.vault.create(path, initialContent);
+}
+
+function normalizeFolder(folder: string): string {
+	const normalized = sanitizeVaultRelativePath(folder || DEFAULT_SETTINGS.memoFolder);
+	return normalizePath(normalized || DEFAULT_SETTINGS.memoFolder);
+}
+
+function normalizeOptionalFolder(folder: string): string {
+	const normalized = sanitizeVaultRelativePath(folder || "");
+	return normalized ? normalizePath(normalized) : "";
+}
+
+function sanitizeVaultRelativePath(path: string): string {
+	return path
+		.replace(/\\/g, "/")
+		.replace(/[\u0000-\u001f\u007f]/g, "")
+		.split("/")
+		.map((part) => part.trim())
+		.filter((part) => part && part !== "." && part !== "..")
+		.join("/");
+}
+
+function normalizeHeadingText(heading: string): string {
+	return heading.trim().replace(/^#{1,6}\s*/, "").replace(/\s+#{1,6}$/, "").trim();
+}
+
+function normalizePositiveInteger(value: unknown, fallback: number): number {
+	const parsed = typeof value === "number" ? value : Number(value);
+	if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+	return Math.round(parsed);
+}
+
+async function loadCoreDailyNotesSettings(app: App): Promise<DailyNotesSettings | null> {
+	const configPath = normalizePath(`${app.vault.configDir}/daily-notes.json`);
+	if (!(await app.vault.adapter.exists(configPath))) return null;
+	try {
+		const options = JSON.parse(await app.vault.adapter.read(configPath)) as Record<string, unknown>;
+		return {
+			folder: typeof options.folder === "string" ? options.folder : undefined,
+			format: typeof options.format === "string" ? options.format : undefined,
+			template: typeof options.template === "string" ? options.template : undefined,
+		};
+	} catch {
+		return null;
+	}
+}
+
+function applyTemplateVariables(template: string, title: string): string {
+	const now = moment();
+	return template
+		.replace(/{{\s*title\s*}}/gi, title)
+		.replace(/{{\s*date\s*}}/gi, now.format("YYYY-MM-DD"))
+		.replace(/{{\s*time\s*}}/gi, now.format("HH:mm"))
+		.replace(/{{\s*date:([^}]+)\s*}}/gi, (_match, format: string) => now.format(format.trim()))
+		.replace(/{{\s*time:([^}]+)\s*}}/gi, (_match, format: string) => now.format(format.trim()));
+}
+
+function ensureTrailingNewline(content: string): string {
+	return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function normalizeButtonLabel(value: unknown, fallback: string): string {
+	const label = String(value ?? "").trim().replace(/\s+/g, " ").slice(0, 8);
+	return label || fallback;
+}
+
+function normalizeSaveTarget(value: string | undefined): SaveTarget {
+	if (value === "daily" || value === "monthly" || value === "default") return value;
+	return "default";
+}
+
+function normalizeTaskStatus(value: string | undefined): TaskStatus | undefined {
+	if (value === "open" || value === "todo" || value === "unchecked") return "open";
+	if (value === "done" || value === "completed" || value === "checked") return "done";
+	if (value === "none" || value === "memo") return "none";
+	return undefined;
+}
+
+function inferDateFromPath(path: string): string {
+	const daily = path.match(/(\d{4}-\d{2}-\d{2})/);
+	if (daily) return daily[1];
+	const monthly = path.match(/(\d{4}-\d{2})/);
+	if (monthly) return `${monthly[1]}-01`;
+	return "0000-00-00";
+}
+
+function isLikelyDailyNotePath(filePath: string, format: string | undefined): boolean {
+	const withoutExtension = filePath.replace(/\.md$/i, "");
+	const baseName = withoutExtension.split("/").pop() ?? withoutExtension;
+	const candidates = Array.from(new Set([withoutExtension, baseName]));
+	const configuredFormat = (format || DEFAULT_SETTINGS.dailyNoteFileFormat).trim();
+
+	if (configuredFormat) {
+		for (const candidate of candidates) {
+			if (moment(candidate, configuredFormat, true).isValid()) return true;
+		}
+	}
+
+	return /(?:^|\/)\d{4}-\d{2}-\d{2}(?:[_\s-][^/]*)?$/.test(withoutExtension);
+}
+
+function formatDateGroupLabel(date: string): string {
+	const day = moment(date, "YYYY-MM-DD");
+	if (!day.isValid()) return date;
+	if (day.isSame(moment(), "day")) return "今日";
+	if (day.isSame(moment().subtract(1, "day"), "day")) return "昨日";
+	return day.format("M月D日 ddd");
+}
+
+function extractTags(content: string): string[] {
+	const matches = content.match(/#[\p{L}\p{N}_/-]+/gu) ?? [];
+	return Array.from(new Set(matches));
+}
+
+function extractTaskInput(content: string): { content: string; taskStatus: TaskStatus } {
+	const match = content.match(/^(?:-\s*)?\[([ xX])\]\s+([\s\S]+)$/);
+	if (!match) return { content, taskStatus: "none" };
+	return {
+		content: match[2].trim(),
+		taskStatus: match[1].toLowerCase() === "x" ? "done" : "open",
+	};
+}
+
+function sanitizeAttachmentName(fileName: string): string {
+	const sanitized = fileName
+		.trim()
+		.replace(/[\\/:*?"<>|#^[\]]+/g, "-")
+		.replace(/\s+/g, " ")
+		.replace(/^\.+/, "")
+		.slice(0, 120);
+	return sanitized || `attachment-${Date.now()}`;
+}
+
+function parseMemoBody(raw: string): { content: string; status: MemoStatus; pinned: boolean; storageId: string | null } {
+	let status: MemoStatus = "active";
+	let pinned = false;
+	let storageId: string | null = null;
+	const content = raw.replace(META_RE, (_all, body: string) => {
+		if (body.includes("status=archived")) status = "archived";
+		if (body.includes("status=deleted")) status = "deleted";
+		if (body.includes("pinned=true")) pinned = true;
+		const idMatch = body.match(/(?:^|;)\s*id=([a-zA-Z0-9_-]+)/);
+		if (idMatch) storageId = idMatch[1];
+		return "";
+	}).trim();
+	return { content, status, pinned, storageId };
+}
+
+function parseMemoMeta(raw: string): { status: MemoStatus; pinned: boolean; storageId: string | null } {
+	const parsed = parseMemoBody(raw);
+	return { status: parsed.status, pinned: parsed.pinned, storageId: parsed.storageId };
+}
+
+function serializeMemoBlock(storageId: string, timestampText: string, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus): string {
+	const metaParts: string[] = [`id=${storageId}`];
+	if (status !== "active") metaParts.push(`status=${status}`);
+	if (pinned) metaParts.push("pinned=true");
+	const escaped = content.trim().replace(/\n/g, "\n  ");
+	const checkbox = taskStatus === "open" ? "[ ] " : taskStatus === "done" ? "[x] " : "";
+	return `- ${checkbox}${timestampText} ${escaped}\n  %% kotonoha:${metaParts.join(";")} %%`;
+}
+
+function memoId(filePath: string, startLine: number, createdAt: string): string {
+	return `${createdAt}:${filePath}:${startLine}`;
+}
+
+function generateMemoId(): string {
+	if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+		return crypto.randomUUID();
+	}
+	return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getHeadingSectionRange(lines: string[], heading: string): { start: number; end: number } | null {
+	const title = normalizeHeadingText(heading) || DEFAULT_SETTINGS.dailyHeading;
+	const headingIndex = lines.findIndex((line) => normalizeMarkdownHeading(line) === title);
+	if (headingIndex === -1) return null;
+	const level = lines[headingIndex].match(/^(#{1,6})\s+/)?.[1].length ?? 6;
+	let end = lines.length;
+	for (let index = headingIndex + 1; index < lines.length; index += 1) {
+		const nextLevel = lines[index].match(/^(#{1,6})\s+/)?.[1].length;
+		if (nextLevel && nextLevel <= level) {
+			end = index;
+			break;
+		}
+	}
+	return { start: headingIndex + 1, end };
+}
+
+function parseMemoItems(raw: string, filePath: string, heading: string | null): MemoItem[] {
+	const lines = raw.split(/\r?\n/);
+	const range = heading ? getHeadingSectionRange(lines, heading) : { start: 0, end: lines.length };
+	if (!range) return [];
+	const items: MemoItem[] = [];
+
+	for (let index = range.start; index < range.end; index += 1) {
+		const startLine = index;
+		const match = lines[index].match(/^- (?:\[([ xX])\] )?(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{1,2}:\d{2})\s+(.+)$/);
+		if (!match) continue;
+
+		const taskStatus: TaskStatus = match[1] ? (match[1].toLowerCase() === "x" ? "done" : "open") : "none";
+		const date = match[2] ?? inferDateFromPath(filePath);
+		const timestampText = match[2] ? `${match[2]} ${match[3]}` : match[3];
+		const createdAt = `${date} ${match[3]}`;
+		const contentLines = [match[4]];
+		const metaLines: string[] = [];
+		let cursor = index + 1;
+		while (cursor < range.end && lines[cursor].startsWith("  ")) {
+			const childLine = lines[cursor].slice(2);
+			if (META_LINE_RE.test(childLine)) {
+				metaLines.push(childLine);
+			} else {
+				contentLines.push(childLine);
+			}
+			cursor += 1;
+		}
+		index = cursor - 1;
+
+		const parsed = parseMemoBody(contentLines.join("\n"));
+		const childMeta = metaLines.map(parseMemoMeta);
+		const storageId = childMeta.find((meta) => meta.storageId)?.storageId ?? parsed.storageId;
+		const status = childMeta.find((meta) => meta.status !== "active")?.status ?? parsed.status;
+		const pinned = parsed.pinned || childMeta.some((meta) => meta.pinned);
+		const createdTime = moment(createdAt, "YYYY-MM-DD HH:mm").valueOf();
+		items.push({
+			id: storageId ?? memoId(filePath, startLine, createdAt),
+			storageId,
+			filePath,
+			startLine,
+			endLine: cursor - 1,
+			timestampText,
+			createdAt,
+			createdTime: Number.isNaN(createdTime) ? 0 : createdTime,
+			content: parsed.content,
+			tags: extractTags(parsed.content),
+			status,
+			pinned,
+			taskStatus,
+		});
+	}
+	return items;
+}
+
+function formatMemoMetaTime(memo: MemoItem): string {
+	if (memo.createdAt.startsWith(moment().format("YYYY-MM-DD"))) return memo.timestampText.replace(/^\d{4}-\d{2}-\d{2}\s+/, "");
+	return memo.createdAt;
+}
+
+function findCurrentMemo(raw: string, memo: MemoItem, heading: string | null): MemoItem | null {
+	const candidates = parseMemoItems(raw, memo.filePath, heading);
+	if (memo.storageId) {
+		return candidates.find((candidate) => candidate.storageId === memo.storageId) ?? null;
+	}
+	const matches = candidates.filter((candidate) =>
+		candidate.createdAt === memo.createdAt &&
+		candidate.content === memo.content &&
+		candidate.taskStatus === memo.taskStatus &&
+		candidate.status === memo.status &&
+		candidate.pinned === memo.pinned
+	);
+	return matches.length === 1 ? matches[0] : null;
+}
+
+function formatMemoForExport(memo: MemoItem): string {
+	const checkbox = memo.taskStatus === "open" ? "- [ ] " : memo.taskStatus === "done" ? "- [x] " : "- ";
+	return `${checkbox}${memo.createdAt} ${memo.content}`;
+}
+
+async function copyText(text: string) {
+	await navigator.clipboard.writeText(text);
+}
+
+function upsertUnderHeading(raw: string, heading: string, memoLine: string, insertAtTop: boolean): string {
+	const title = normalizeHeadingText(heading) || DEFAULT_SETTINGS.dailyHeading;
+	const headingLine = `## ${title}`;
+	const lines = raw.split(/\r?\n/);
+	const headingIndex = lines.findIndex((line) => normalizeMarkdownHeading(line) === title);
+
+	if (headingIndex === -1) {
+		const prefix = raw.endsWith("\n") ? raw : `${raw}\n`;
+		return `${prefix}\n${headingLine}\n${memoLine}\n`;
+	}
+
+	if (insertAtTop) {
+		lines.splice(headingIndex + 1, 0, memoLine);
+		return lines.join("\n");
+	}
+
+	let insertAt = lines.length;
+	for (let index = headingIndex + 1; index < lines.length; index += 1) {
+		if (/^#{1,6}\s+/.test(lines[index])) {
+			insertAt = index;
+			break;
+		}
+	}
+
+	lines.splice(insertAt, 0, memoLine);
+	return lines.join("\n");
+}
+
+function normalizeMarkdownHeading(line: string): string | null {
+	const match = line.trim().match(/^#{1,6}\s+(.+?)\s*#*$/);
+	if (!match) return null;
+	return normalizeHeadingText(match[1]);
+}
+
+export {
+	findCurrentMemo,
+	isLikelyDailyNotePath,
+	parseMemoItems,
+	normalizeFolder,
+	normalizeOptionalFolder,
+	serializeMemoBlock,
+	upsertUnderHeading,
+};

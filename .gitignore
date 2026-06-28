@@ -1,0 +1,12 @@
+node_modules/
+plugin-dist/
+dist/
+main.js
+.DS_Store
+tests/ui/artifacts/
+.env
+.env.*
+*.log
+.obsidian/
+data.json
+data.*.json

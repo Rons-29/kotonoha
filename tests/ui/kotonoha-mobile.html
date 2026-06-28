@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Kotonoha Mobile UI Test</title>
+  <link rel="stylesheet" href="../../styles.css">
+  <style>
+    :root {
+      --background-primary: #000;
+      --background-secondary: #1f1f1f;
+      --background-modifier-border: #3a3a3a;
+      --interactive-accent: #8957ff;
+      --text-accent: #a98cff;
+      --text-normal: #e8e8e8;
+      --text-muted: #a7a7a7;
+      --text-on-accent: #fff;
+      --font-ui-smaller: 13px;
+      color-scheme: dark;
+      font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      color: var(--text-normal);
+      background: var(--background-primary);
+    }
+
+    button,
+    input,
+    textarea {
+      border: 0;
+      border-radius: 12px;
+      color: var(--text-normal);
+      background: #333;
+      font: inherit;
+    }
+
+    textarea,
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 14px 16px;
+    }
+
+    .test-shell {
+      position: relative;
+      width: min(100vw, 393px);
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .status-bar {
+      position: fixed;
+      z-index: 100;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      pointer-events: none;
+      background: linear-gradient(#000, rgba(0, 0, 0, 0.74), transparent);
+    }
+
+    .status-bar::before {
+      content: "0:21";
+      position: absolute;
+      top: 16px;
+      left: 62px;
+      font-size: 17px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .status-bar::after {
+      content: "||||  Wi-Fi  47%";
+      position: absolute;
+      top: 17px;
+      right: 22px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .mobile-browser-bar {
+      position: fixed;
+      z-index: 100;
+      left: 42px;
+      right: 42px;
+      bottom: 16px;
+      height: 62px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 34px;
+      pointer-events: none;
+      background: linear-gradient(#444, #242424);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+
+    .mobile-browser-bar::before {
+      content: "‹   ›     ○     +     3     ≡";
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #ddd;
+      font-size: 32px;
+      letter-spacing: 12px;
+    }
+
+    .kotonoha-view {
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body class="is-mobile">
+  <div class="test-shell">
+    <div class="status-bar" aria-hidden="true"></div>
+    <main class="kotonoha-view" data-testid="kotonoha-view">
+      <section class="kotonoha-list kotonoha-layout-list" data-testid="memo-list">
+        <div class="kotonoha-date-heading">今日</div>
+        <article class="kotonoha-item is-pinned">
+          <div class="kotonoha-meta">
+            <span>2026-06-10 00:18</span>
+          </div>
+          <div class="kotonoha-content-row kotonoha-task-open">
+            <button class="kotonoha-task-indicator">□</button>
+            <div class="kotonoha-content">iPhoneからすぐ書けるか確認する #本</div>
+          </div>
+          <div class="kotonoha-card-actions">
+            <button>…</button>
+          </div>
+          <div class="kotonoha-card-detail-actions" hidden>
+            <button>編集</button>
+            <button>コピー</button>
+            <button>ピン留め</button>
+            <button>タスク化</button>
+          </div>
+        </article>
+        <div class="kotonoha-date-heading">昨日</div>
+        <article class="kotonoha-item">
+          <div class="kotonoha-meta">
+            <span>2026-06-09 15:15</span>
+          </div>
+          <div class="kotonoha-content-row kotonoha-task-none">
+            <div class="kotonoha-content">これでどう？いけた</div>
+          </div>
+          <div class="kotonoha-card-actions">
+            <button>…</button>
+          </div>
+          <div class="kotonoha-card-detail-actions" hidden>
+            <button>編集</button>
+            <button>コピー</button>
+            <button>アーカイブ</button>
+          </div>
+        </article>
+        <div class="kotonoha-date-heading">6月3日 水</div>
+        <article class="kotonoha-item">
+          <div class="kotonoha-meta">
+            <span>2026-06-03 02:23</span>
+          </div>
+          <div class="kotonoha-content-row kotonoha-task-done">
+            <button class="kotonoha-task-indicator">✓</button>
+            <div class="kotonoha-content">短いメモが続くときの余白を見る</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="kotonoha-capture" data-testid="capture">
+        <textarea class="kotonoha-input" placeholder="いま残したいことを書く。[ ] で未完了、[x] で完了。"></textarea>
+        <div class="kotonoha-actions">
+          <button>タスク</button>
+          <button>添付</button>
+          <button class="kotonoha-primary-button">残す</button>
+        </div>
+        <input class="kotonoha-file-input" type="file" multiple>
+      </section>
+    </main>
+    <div class="mobile-browser-bar" aria-hidden="true"></div>
+  </div>
+  <script>
+    function kotonohaLayoutResult() {
+      const rect = (selector) => {
+        const el = document.querySelector(selector);
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return { top: r.top, right: r.right, bottom: r.bottom, left: r.left, width: r.width, height: r.height };
+      };
+      const capture = rect("[data-testid='capture']");
+      const toolbar = rect(".mobile-browser-bar");
+      const list = rect("[data-testid='memo-list']");
+      const primary = rect(".kotonoha-primary-button");
+      const actions = document.querySelector(".kotonoha-actions");
+      return {
+        hasAdvancedControls: Boolean(document.querySelector(".kotonoha-search, .kotonoha-control-stack")),
+        hasTaskButton: Array.from(document.querySelectorAll(".kotonoha-actions button")).some((button) => button.textContent === "タスク"),
+        hasAttachButton: Array.from(document.querySelectorAll(".kotonoha-actions button")).some((button) => button.textContent === "添付"),
+        hasPrimarySaveButton: document.querySelector(".kotonoha-primary-button")?.textContent === "残す",
+        hasRightPrimaryAction: Array.from(document.querySelectorAll(".kotonoha-actions button")).at(-1)?.textContent === "残す",
+        primaryButtonVisible: Boolean(primary && primary.left >= 0 && primary.right <= window.innerWidth),
+        hasOnlyPrimaryActions: document.querySelectorAll(".kotonoha-actions button").length === 3,
+        actionsNoHorizontalOverflow: Boolean(actions && actions.scrollWidth <= actions.clientWidth + 1),
+        cardActionsCompact: Array.from(document.querySelectorAll(".kotonoha-card-actions")).every((actions) => actions.querySelectorAll("button").length <= 1),
+        filePathHidden: document.querySelectorAll(".kotonoha-meta a").length === 0,
+        saveTargetHidden: document.querySelectorAll(".kotonoha-control-row").length === 0,
+        taskIndicatorsVisible: document.querySelectorAll(".kotonoha-task-indicator").length === 2,
+        dateGroupsVisible: document.querySelectorAll(".kotonoha-date-heading").length === 3,
+        captureAboveBottomToolbar: Boolean(capture && toolbar && capture.bottom <= toolbar.top - 8),
+        listBelowStatusBar: Boolean(list && list.top >= 52),
+        capture,
+        toolbar,
+        list,
+      };
+    }
+
+    window.addEventListener("load", () => {
+      const result = document.createElement("script");
+      result.id = "kotonoha-layout-result";
+      result.type = "application/json";
+      result.textContent = JSON.stringify(kotonohaLayoutResult());
+      document.body.appendChild(result);
+    });
+  </script>
+</body>
+</html>

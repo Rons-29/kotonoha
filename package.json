@@ -1,0 +1,20 @@
+{
+  "name": "kotonoha",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node esbuild.mjs",
+    "dev": "node esbuild.mjs --watch",
+    "ui:serve": "node tests/ui/serve.mjs",
+    "ui:check": "node tests/ui/check-layout.mjs",
+    "test:storage": "node tests/storage/check-storage.mjs",
+    "release:check": "node tests/release/check-release.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.2",
+    "esbuild": "^0.25.0",
+    "obsidian": "1.13.0",
+    "typescript": "^5.9.0"
+  }
+}
