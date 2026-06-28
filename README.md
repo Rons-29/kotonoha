@@ -12,6 +12,12 @@ The name comes from the Japanese word `言の葉` (`kotonoha`), an older express
 
 Kotonoha is designed for people who already use Daily Notes and want a faster place to capture small thoughts, tasks, links, and attachments without leaving Markdown.
 
+![Kotonoha quick capture](assets/kotonoha-capture.png)
+
+![Kotonoha Daily Note output](assets/kotonoha-daily-note.png)
+
+![Kotonoha timeline review](assets/kotonoha-timeline.png)
+
 ## Features
 
 - Append notes to Daily Notes

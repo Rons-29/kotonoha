@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kotonoha README screenshots</title>
+  <style>
+    :root {
+      --bg: #111113;
+      --panel: #1c1c1f;
+      --panel-2: #252529;
+      --border: #3a3a42;
+      --text: #f2f2f4;
+      --muted: #a9a9b2;
+      --accent: #8b5cf6;
+      --accent-2: #a78bfa;
+      --line: #3f3f46;
+      color-scheme: dark;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .screen {
+      width: 1200px;
+      height: 760px;
+      padding: 44px;
+      background:
+        radial-gradient(circle at 80% 8%, rgba(139, 92, 246, 0.18), transparent 32%),
+        linear-gradient(135deg, #111113, #18181b);
+    }
+
+    .frame {
+      height: 100%;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      overflow: hidden;
+      background: #09090b;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 58px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--border);
+      background: #18181b;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 750;
+      font-size: 20px;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 9px;
+      background: var(--accent);
+      color: white;
+      font-weight: 800;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      height: calc(100% - 58px);
+    }
+
+    .sidebar {
+      padding: 24px;
+      border-right: 1px solid var(--border);
+      background: #121214;
+    }
+
+    .sidebar h1,
+    .note h1,
+    .timeline h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: 0;
+    }
+
+    .sidebar p {
+      margin: 0 0 22px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .phone {
+      width: 286px;
+      height: 424px;
+      margin: 0 auto;
+      border: 1px solid #3f3f46;
+      border-radius: 34px;
+      padding: 18px 14px;
+      background: #050505;
+      box-shadow: inset 0 0 0 7px #111;
+    }
+
+    .phone-content {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      gap: 12px;
+      padding: 20px 8px 12px;
+    }
+
+    .memo-list {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .date {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .memo {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+    }
+
+    .time {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .memo-text {
+      font-size: 16px;
+      line-height: 1.5;
+    }
+
+    .task {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+
+    .capture {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 12px;
+      background: var(--panel);
+    }
+
+    .textarea {
+      min-height: 74px;
+      border-radius: 18px;
+      padding: 14px;
+      color: #d9d9df;
+      background: #343438;
+      font-weight: 650;
+      line-height: 1.5;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 10px;
+    }
+
+    .button {
+      border-radius: 12px;
+      padding: 10px 14px;
+      background: #343438;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .button.primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .canvas {
+      padding: 28px;
+    }
+
+    .note {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 52px;
+      border-radius: 12px;
+      background: #202024;
+      box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28);
+    }
+
+    .rule {
+      height: 1px;
+      margin: 26px 0;
+      background: var(--line);
+    }
+
+    .note h2 {
+      margin: 0 0 16px;
+      font-size: 24px;
+    }
+
+    .bullet {
+      margin: 12px 0;
+      font-size: 19px;
+      line-height: 1.6;
+    }
+
+    .meta {
+      color: #73737c;
+      font-size: 15px;
+      margin-left: 28px;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: 1fr 330px;
+      gap: 22px;
+      height: 100%;
+      padding: 28px;
+    }
+
+    .timeline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow: hidden;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      background: var(--panel);
+    }
+
+    .card.pinned {
+      border-color: rgba(139, 92, 246, 0.68);
+      box-shadow: inset 4px 0 0 var(--accent);
+    }
+
+    .card-title {
+      display: flex;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+
+    .card-body {
+      font-size: 19px;
+      line-height: 1.5;
+    }
+
+    .side-panel {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      background: #151518;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 16px 0 22px;
+    }
+
+    .stat {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      background: var(--panel);
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 22px;
+    }
+
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .day {
+      aspect-ratio: 1;
+      border-radius: 5px;
+      background: #2d2d31;
+    }
+
+    .day.on {
+      background: #6d45d8;
+    }
+
+    .day.hot {
+      background: #a78bfa;
+    }
+
+    .tag {
+      display: inline-flex;
+      margin: 6px 6px 0 0;
+      border-radius: 999px;
+      padding: 8px 10px;
+      background: #303035;
+      color: #dedee4;
+      font-weight: 700;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <div class="screen" id="capture">
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><div class="mark">K</div>Kotonoha</div>
+        <div class="subtitle">Quick capture for Daily Notes</div>
+      </div>
+      <div class="layout">
+        <aside class="sidebar">
+          <h1>Write quickly</h1>
+          <p>Capture small thoughts, tasks, links, and attachments from a mobile-friendly bottom input.</p>
+          <div class="phone">
+            <div class="phone-content">
+              <div class="memo-list">
+                <div class="date">Today</div>
+                <div class="memo">
+                  <div class="time">18:30</div>
+                  <div class="memo-text">Draft the release note #writing</div>
+                </div>
+                <div class="memo">
+                  <div class="time">18:35</div>
+                  <div class="memo-text task"><span>□</span><span>Check the screenshots on mobile</span></div>
+                </div>
+              </div>
+              <div class="capture">
+                <div class="textarea">Capture what you want to keep...</div>
+                <div class="actions">
+                  <div class="button">Task</div>
+                  <div class="button">Attach</div>
+                  <div class="button primary">Save</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </aside>
+        <main class="canvas">
+          <div class="note">
+            <h1>Today's Daily Note</h1>
+            <p class="subtitle">Kotonoha saves under the heading you choose.</p>
+            <div class="rule"></div>
+            <h2>## つぶやき</h2>
+            <div class="bullet">- 18:30 Draft the release note #writing</div>
+            <div class="meta">%% kotonoha:id=... %%</div>
+            <div class="bullet">- [ ] 18:35 Check the screenshots on mobile</div>
+            <div class="meta">%% kotonoha:id=... %%</div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="daily-note">
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><div class="mark">K</div>Kotonoha</div>
+        <div class="subtitle">Daily Notes remain readable Markdown</div>
+      </div>
+      <main class="canvas">
+        <div class="note">
+          <h1>2026-06-28</h1>
+          <p class="subtitle">Daily note template content can stay above or below Kotonoha's heading.</p>
+          <div class="rule"></div>
+          <h2>## つぶやき</h2>
+          <div class="bullet">- 09:12 Morning idea for the project #idea</div>
+          <div class="meta">%% kotonoha:id=ab12... %%</div>
+          <div class="bullet">- [ ] 12:40 Review the checklist before publishing</div>
+          <div class="meta">%% kotonoha:id=cd34... %%</div>
+          <div class="bullet">- [x] 17:05 Add screenshots to the README</div>
+          <div class="meta">%% kotonoha:id=ef56... %%</div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="screen" id="timeline">
+    <div class="frame">
+      <div class="topbar">
+        <div class="brand"><div class="mark">K</div>Kotonoha</div>
+        <div class="subtitle">Review notes and tasks later</div>
+      </div>
+      <div class="timeline">
+        <main class="timeline-list">
+          <h1>Timeline</h1>
+          <article class="card pinned">
+            <div class="card-title"><span>Pinned / 2026-06-28 18:35</span><span>□ task</span></div>
+            <div class="card-body">Check the screenshots on mobile #release</div>
+          </article>
+          <article class="card">
+            <div class="card-title"><span>2026-06-28 18:30</span><span>memo</span></div>
+            <div class="card-body">Draft the release note and keep it short.</div>
+          </article>
+          <article class="card">
+            <div class="card-title"><span>2026-06-27 21:10</span><span>✓ done</span></div>
+            <div class="card-body">Add the Daily Notes fallback behavior.</div>
+          </article>
+          <article class="card">
+            <div class="card-title"><span>2026-06-24 08:42</span><span>memo</span></div>
+            <div class="card-body">Small ideas stay in Daily Notes, then come back in the timeline.</div>
+          </article>
+        </main>
+        <aside class="side-panel">
+          <h1>Review</h1>
+          <p class="subtitle">Turn on advanced controls when you want search, tags, stats, and heatmap.</p>
+          <div class="stat-grid">
+            <div class="stat"><span class="subtitle">Today</span><strong>3</strong></div>
+            <div class="stat"><span class="subtitle">Open</span><strong>1</strong></div>
+            <div class="stat"><span class="subtitle">Pinned</span><strong>1</strong></div>
+            <div class="stat"><span class="subtitle">Done</span><strong>1</strong></div>
+          </div>
+          <div>
+            <span class="tag">#release</span>
+            <span class="tag">#idea</span>
+            <span class="tag">#writing</span>
+          </div>
+          <div class="heatmap">
+            <div class="day"></div><div class="day on"></div><div class="day"></div><div class="day hot"></div><div class="day on"></div><div class="day"></div><div class="day on"></div>
+            <div class="day on"></div><div class="day"></div><div class="day"></div><div class="day on"></div><div class="day hot"></div><div class="day on"></div><div class="day"></div>
+            <div class="day"></div><div class="day on"></div><div class="day hot"></div><div class="day"></div><div class="day on"></div><div class="day"></div><div class="day hot"></div>
+            <div class="day on"></div><div class="day"></div><div class="day on"></div><div class="day"></div><div class="day hot"></div><div class="day on"></div><div class="day"></div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+  <script>
+    const selected = new URLSearchParams(window.location.search).get("screen");
+    if (selected) {
+      for (const screen of document.querySelectorAll(".screen")) {
+        screen.style.display = screen.id === selected ? "block" : "none";
+      }
+    }
+  </script>
+</body>
+</html>
