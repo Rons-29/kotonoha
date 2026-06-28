@@ -16,7 +16,8 @@
   order: 0;
 }
 
-.kotonoha-header h2 {
+.kotonoha-title {
+  font-weight: 700;
   margin: 0;
   font-size: 18px;
   line-height: 1.2;
@@ -473,8 +474,19 @@
   background: var(--background-secondary);
 }
 
-.kotonoha-settings-hero h3 {
+.kotonoha-settings-title,
+.kotonoha-modal-title {
+  font-weight: 700;
+  font-size: var(--font-ui-large);
+  line-height: 1.3;
   margin: 0 0 4px;
+}
+
+.kotonoha-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .kotonoha-settings-hero p {
