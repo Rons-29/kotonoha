@@ -19,7 +19,7 @@ assert.equal(packageJson.version, manifest.version, "package.json and manifest.j
 assert.equal(versions[manifest.version], manifest.minAppVersion, "versions.json must map the release to minAppVersion");
 assert.ok(manifest.id && !manifest.id.includes("obsidian"));
 assert.equal(manifest.id, "kotonoha");
-assert.ok(manifest.description.length <= 250 && manifest.description.endsWith("。"));
+assert.ok(manifest.description.length <= 250 && manifest.description.endsWith("."));
 
 for (const asset of ["main.js", "manifest.json", "styles.css", "README.md", "LICENSE", "SECURITY.md", "CONTRIBUTING.md"]) {
   await access(resolve(root, asset), constants.R_OK);
