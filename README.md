@@ -1,6 +1,51 @@
 # Kotonoha
 
-言の葉を日々のノートに残すObsidianプラグインです。
+Kotonoha is an Obsidian plugin for saving short notes and tasks to Daily Notes, then reviewing them in a simple timeline.
+
+## Features
+
+- Append notes to Daily Notes
+- Save tasks and toggle completion
+- Review notes in a timeline
+- Search by text, tags, and date range
+- Use a heatmap and random review
+- Save file attachments
+
+## Install
+
+After Kotonoha is listed in Community Plugins, search for `Kotonoha` in Obsidian settings and install it.
+
+To install manually, download these files from the latest release and place them in `.obsidian/plugins/kotonoha/` in your vault:
+
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+Reload Obsidian, then enable Kotonoha from Community Plugins.
+
+## Usage
+
+1. Open Kotonoha.
+2. Write a note in the input area.
+3. Press `残す` to save it.
+
+Turn on `タスク` before saving to create an open task. You can also start the text with `[ ]` or `[x]`.
+
+## Daily Notes
+
+By default, Kotonoha appends notes to today's Daily Note. If today's Daily Note does not exist, Kotonoha creates it using your Daily Notes settings and template before saving.
+
+You can change the destination heading in settings. The default heading is `つぶやき`.
+
+```markdown
+## つぶやき
+- 18:30 Finished today's notes #work
+  %% kotonoha:id=... %%
+- [ ] 18:35 Review tomorrow's document
+  %% kotonoha:id=... %%
+```
+
+## 日本語
 
 Kotonohaは、短いメモやタスクをDaily Notesへすばやく保存し、あとからタイムラインで見返すためのプラグインです。
 
