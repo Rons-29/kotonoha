@@ -337,21 +337,22 @@ export default class KotonohaPlugin extends Plugin {
 	}
 
 	async loadMemos(): Promise<MemoItem[]> {
-		const files = this.getSourceFiles();
+		const files = await this.getSourceFiles();
 		const all = await Promise.all(files.map((file) => this.loadMemosFromFile(file)));
 		return all.flat().sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdTime - a.createdTime || b.id.localeCompare(a.id));
 	}
 
-	getSourceFiles(): TFile[] {
-		const files = this.app.vault.getMarkdownFiles();
+	async getSourceFiles(): Promise<TFile[]> {
 		const fallbackFolder = normalizeFolder(this.settings.memoFolder);
 		if (!this.settings.captureToDailyNote) {
-			return files.filter((file) => file.path.startsWith(`${fallbackFolder}/`));
+			return listMarkdownFilesInFolder(this.app, fallbackFolder);
 		}
 
 		const dailyFolder = normalizeOptionalFolder(this.dailyNotesSettings?.folder ?? this.settings.dailyNoteFolder);
 		const dailyFormat = this.dailyNotesSettings?.format ?? this.settings.dailyNoteFileFormat;
-		if (dailyFolder) return files.filter((file) => file.path.startsWith(`${dailyFolder}/`));
+		if (dailyFolder) return listMarkdownFilesInFolder(this.app, dailyFolder);
+		const inferredFolder = inferFolderFromDateFormat(dailyFormat);
+		const files = await listMarkdownFilesInFolder(this.app, inferredFolder);
 		return files.filter((file) => isLikelyDailyNotePath(file.path, dailyFormat));
 	}
 
@@ -701,7 +702,6 @@ class KotonohaView extends ItemView {
 
 			const secondaryActions = capture.createDiv({ cls: "kotonoha-secondary-actions" });
 			secondaryActions.createEl("button", { text: "回顧" }).addEventListener("click", () => this.pickRandomMemo());
-			secondaryActions.createEl("button", { text: "表示分をコピー" }).addEventListener("click", () => void this.copyVisibleMemos());
 			secondaryActions.createEl("button", { text: "再読み込み" }).addEventListener("click", () => void this.reload());
 		}
 		capture.createDiv({ cls: "kotonoha-hint", text: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Cmd/Ctrl+Enter: 保存" });
@@ -1006,12 +1006,6 @@ class KotonohaView extends ItemView {
 		detailActions.hide();
 
 		const editButton = detailActions.createEl("button", { text: "編集" });
-		detailActions.createEl("button", { text: "コピー" }).addEventListener("click", () => {
-			void (async () => {
-				await copyText(formatMemoForExport(memo));
-				new Notice("メモをコピーしました。");
-			})();
-		});
 		detailActions.createEl("button", { text: memo.pinned ? "ピン解除" : "ピン留め" }).addEventListener("click", () => {
 			void this.plugin.updateMemoPinned(memo, !memo.pinned);
 		});
@@ -1111,16 +1105,6 @@ class KotonohaView extends ItemView {
 
 	clearRandomReview() {
 		this.randomMemoIds.clear();
-	}
-
-	async copyVisibleMemos() {
-		const memos = this.getFilteredMemos(true);
-		if (memos.length === 0) {
-			new Notice("コピーできるメモがありません。");
-			return;
-		}
-		await copyText(memos.map(formatMemoForExport).join("\n"));
-		new Notice(`${memos.length}件のメモをコピーしました。`);
 	}
 }
 
@@ -1355,6 +1339,34 @@ async function ensureParentFolder(app: App, path: string) {
 	if (parent) await ensureFolder(app, parent);
 }
 
+async function listMarkdownFilesInFolder(app: App, folder: string): Promise<TFile[]> {
+	const normalizedFolder = normalizeOptionalFolder(folder);
+	const root = normalizedFolder;
+	const results: TFile[] = [];
+
+	async function visit(currentFolder: string) {
+		let listed: { files: string[]; folders: string[] };
+		try {
+			listed = await app.vault.adapter.list(currentFolder);
+		} catch {
+			return;
+		}
+
+		for (const filePath of listed.files) {
+			if (!filePath.toLowerCase().endsWith(".md")) continue;
+			const file = app.vault.getAbstractFileByPath(normalizePath(filePath));
+			if (file instanceof TFile) results.push(file);
+		}
+
+		for (const childFolder of listed.folders) {
+			await visit(normalizePath(childFolder));
+		}
+	}
+
+	await visit(root);
+	return results;
+}
+
 async function getOrCreateFile(app: App, path: string, initialContent: string): Promise<TFile> {
 	const existing = app.vault.getAbstractFileByPath(path);
 	if (existing instanceof TFile) return existing;
@@ -1471,6 +1483,12 @@ function inferDateFromPath(path: string): string {
 	const monthly = path.match(/(\d{4}-\d{2})/);
 	if (monthly) return `${monthly[1]}-01`;
 	return "0000-00-00";
+}
+
+function inferFolderFromDateFormat(format: string | undefined): string {
+	const normalizedFormat = normalizePath((format || DEFAULT_SETTINGS.dailyNoteFileFormat).trim());
+	if (!normalizedFormat.includes("/")) return "";
+	return normalizeOptionalFolder(normalizedFormat.split("/").slice(0, -1).join("/"));
 }
 
 function isLikelyDailyNotePath(filePath: string, format: string | undefined): boolean {
@@ -1648,15 +1666,6 @@ function findCurrentMemo(raw: string, memo: MemoItem, heading: string | null): M
 		candidate.pinned === memo.pinned
 	);
 	return matches.length === 1 ? matches[0] : null;
-}
-
-function formatMemoForExport(memo: MemoItem): string {
-	const checkbox = memo.taskStatus === "open" ? "- [ ] " : memo.taskStatus === "done" ? "- [x] " : "- ";
-	return `${checkbox}${memo.createdAt} ${memo.content}`;
-}
-
-async function copyText(text: string) {
-	await navigator.clipboard.writeText(text);
 }
 
 function upsertUnderHeading(raw: string, heading: string, memoLine: string, insertAtTop: boolean): string {
