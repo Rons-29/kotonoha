@@ -2,6 +2,8 @@
 
 Kotonoha is an Obsidian plugin for saving short notes and tasks to Daily Notes, then reviewing them in a simple timeline.
 
+The name comes from the Japanese word `言の葉` (`kotonoha`), an older expression for words or language.
+
 ## Features
 
 - Append notes to Daily Notes
