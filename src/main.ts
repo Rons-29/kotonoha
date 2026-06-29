@@ -1567,6 +1567,10 @@ class KotonohaSettingTab extends PluginSettingTab {
 	}
 
 	display() {
+		this.renderSettings();
+	}
+
+	renderSettings() {
 		const { containerEl } = this;
 		containerEl.empty();
 
@@ -1594,7 +1598,7 @@ class KotonohaSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					this.plugin.settings.language = normalizeLanguageSetting(value);
 					await this.plugin.saveSettings();
-					this.display();
+					this.renderSettings();
 					for (const view of this.plugin.getOpenViews()) {
 						await view.render();
 						await view.reload();
