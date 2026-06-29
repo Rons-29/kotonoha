@@ -78,6 +78,7 @@ async function main() {
         hasTaskButton: actionLabels.includes("タスク"),
         hasAttachButton: actionLabels.includes("添付"),
         hasOnlyPrimaryActions: actionLabels.length === 3,
+        hasTargetLine: document.querySelector(".kotonoha-target-line")?.textContent === "保存先: 今日のDaily Note / つぶやき",
         actionsNoHorizontalOverflow: Boolean(actions && actions.scrollWidth <= actions.clientWidth + 1),
         cardActionsCompact: Array.from(document.querySelectorAll(".kotonoha-card-actions")).every((cardActions) => cardActions.querySelectorAll("button").length <= 1),
         filePathHidden: document.querySelectorAll(".kotonoha-meta a").length === 0,
@@ -99,6 +100,7 @@ async function main() {
     if (!result.hasTaskButton) failures.push("タスクボタンが表示されていません。");
     if (!result.hasAttachButton) failures.push("添付ボタンが表示されていません。");
     if (!result.hasOnlyPrimaryActions) failures.push("通常表示の操作ボタンが多すぎます。");
+    if (!result.hasTargetLine) failures.push("保存先の控えめな表示がありません。");
     if (!result.actionsNoHorizontalOverflow) failures.push("操作ボタン列が横にはみ出しています。");
     if (!result.cardActionsCompact) failures.push("カード操作ボタンが多すぎます。");
     if (!result.filePathHidden) failures.push("通常表示でファイルパスが表示されています。");
@@ -175,6 +177,7 @@ async function runWithChrome() {
 		if (!result.hasTaskButton) failures.push("タスクボタンが表示されていません。");
 		if (!result.hasAttachButton) failures.push("添付ボタンが表示されていません。");
 		if (!result.hasOnlyPrimaryActions) failures.push("通常表示の操作ボタンが多すぎます。");
+		if (!result.hasTargetLine) failures.push("保存先の控えめな表示がありません。");
 		if (!result.actionsNoHorizontalOverflow) failures.push("操作ボタン列が横にはみ出しています。");
 		if (!result.cardActionsCompact) failures.push("カード操作ボタンが多すぎます。");
 		if (!result.filePathHidden) failures.push("通常表示でファイルパスが表示されています。");

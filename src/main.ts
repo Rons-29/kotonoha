@@ -22,6 +22,7 @@ const MAX_ATTACHMENT_FILES = 10;
 const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
 type KotonohaSettings = {
+	language: KotonohaLanguageSetting;
 	memoFolder: string;
 	dailyNoteFolder: string;
 	dailyNoteFileFormat: string;
@@ -48,8 +49,12 @@ type TaskFilter = "all" | "memo" | "open" | "done";
 type TaskStatus = "none" | "open" | "done";
 type SaveTarget = "default" | "daily" | "monthly";
 type ViewLayout = "list" | "compact" | "grid";
+type ReviewMode = "random" | "today" | "sevenDaysAgo";
+type KotonohaLanguageSetting = "auto" | "ja" | "en";
+type KotonohaLanguage = "ja" | "en";
 type DailyNotesSettings = { folder?: string; format?: string; template?: string };
 type AttachmentSaveResult = { links: string[]; paths: string[] };
+type CaptureResult = { path: string; target: "daily" | "monthly" };
 type LoadedSettings = Partial<Record<keyof KotonohaSettings, unknown>>;
 
 type MemoItem = {
@@ -69,6 +74,7 @@ type MemoItem = {
 };
 
 const DEFAULT_SETTINGS: KotonohaSettings = {
+	language: "auto",
 	memoFolder: "Kotonoha",
 	dailyNoteFolder: "",
 	dailyNoteFileFormat: "YYYY-MM-DD",
@@ -88,6 +94,329 @@ const DEFAULT_SETTINGS: KotonohaSettings = {
 	draftSaveTarget: "default",
 };
 
+const TRANSLATIONS = {
+	ja: {
+		openKotonoha: "Kotonoha を開く",
+		openTimelineCommand: "メモタイムラインを開く",
+		captureSelectionCommand: "選択範囲をメモタイムラインに保存",
+		randomReviewCommand: "ふりかえりを表示",
+		cleanMetadataCommand: "Daily Note上のKotonoha内部IDを非表示にする",
+		noSelection: "選択中のテキストがありません。",
+		emptyMemo: "メモが空です。",
+		memoTooLong: "メモが長すぎます。{count}文字以内にしてください。",
+		saveFailed: "保存できませんでした: {message}",
+		saveFailedGeneric: "保存できませんでした。",
+		savedDaily: "今日のDaily Noteに残しました。",
+		savedMonthly: "Kotonohaに残しました。",
+		protocolEmpty: "URL から保存するメモ本文がありません。",
+		protocolTooLong: "URL から保存できる本文は{count}文字までです。",
+		attachmentTooMany: "添付できるファイルは一度に{count}個までです。",
+		attachmentTooLarge: "添付ファイルは1つ{mb}MBまでです。",
+		attachmentSaveFailed: "添付を保存できませんでした: {message}",
+		attachmentSaveFailedGeneric: "添付を保存できませんでした。",
+		titleSubtitle: "日々の言葉をDaily Notesへ",
+		search: "検索",
+		status: "状態",
+		normal: "通常",
+		all: "すべて",
+		archive: "アーカイブ",
+		trash: "ゴミ箱",
+		period: "期間",
+		allPeriod: "全期間",
+		today: "今日",
+		sevenDays: "7日",
+		thirtyDays: "30日",
+		type: "種類",
+		memoAndTask: "メモ+タスク",
+		memoOnly: "メモのみ",
+		openTask: "未完了",
+		doneTask: "完了",
+		display: "表示",
+		detailList: "詳細リスト",
+		compact: "圧縮",
+		cardGrid: "カードグリッド",
+		placeholder: "いま残したいことを書く。[ ] で未完了、[x] で完了。",
+		task: "タスク",
+		attach: "添付",
+		attachCount: "添付 {count}",
+		save: "残す",
+		saveTarget: "保存先",
+		defaultTarget: "設定通り",
+		dailyTarget: "日次",
+		monthlyTarget: "月次",
+		targetLine: "保存先: {target} / {heading}",
+		targetDaily: "今日のDaily Note",
+		targetMonthly: "月次メモ",
+		reflect: "ふりかえり",
+		reflectRandom: "ランダム",
+		reflectToday: "今日",
+		reflectSevenDaysAgo: "7日前",
+		reload: "再読み込み",
+		hint: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Cmd/Ctrl+Enter: 保存",
+		noReviewMemos: "表示できるメモがありません。",
+		emptyNoMemos: "まだ言の葉はありません。今日のひとことを残してみましょう。",
+		emptyFiltered: "この条件に合う言の葉はありません。",
+		activeCount: "通常 {count}",
+		todayCount: "今日 {count}",
+		archiveCount: "アーカイブ {count}",
+		openTaskCount: "未完了 {count}",
+		trashCount: "ゴミ箱 {count}",
+		customDateChip: "{date} のメモ",
+		randomReviewChip: "ふりかえり {count}件",
+		tagChip: "タグ {tag}",
+		clear: "解除",
+		dailyProgress: "今日の進捗 {count}/{goal}",
+		heatmapTitle: "{date}: {count}件",
+		pinnedPrefix: "固定 / ",
+		backToOpen: "未完了に戻す",
+		completeTask: "タスク完了",
+		more: "…",
+		close: "閉じる",
+		edit: "編集",
+		unpin: "ピン解除",
+		pin: "ピン留め",
+		taskify: "タスク化",
+		untask: "タスク解除",
+		openNote: "ノートを開く",
+		cancel: "キャンセル",
+		restore: "復元",
+		deletePermanently: "完全削除",
+		undo: "元に戻す",
+		undone: "元に戻しました。",
+		undoFailed: "元に戻せませんでした。",
+		memoUpdated: "メモを更新しました。",
+		archivedNotice: "アーカイブしました。",
+		trashedNotice: "ゴミ箱に移動しました。",
+		restoredNotice: "復元しました。",
+		pinnedNotice: "ピン留めしました。",
+		unpinnedNotice: "ピン留めを解除しました。",
+		taskDoneNotice: "タスクを完了にしました。",
+		taskOpenNotice: "タスクを未完了にしました。",
+		taskNoneNotice: "タスク扱いを解除しました。",
+		safeTargetError: "対象のメモを安全に特定できませんでした。再読み込みしてから試してください。",
+		deletedPermanentlyNotice: "メモを完全に削除しました。",
+		deleteFailed: "メモを削除できませんでした。",
+		updateFailed: "メモを更新できませんでした。",
+		undoTargetMissing: "Undo対象のメモが見つかりません。",
+		cleanedMetadata: "Kotonohaの内部IDを整理しました。",
+		noMetadataToClean: "整理できるKotonohaの内部IDはありません。",
+		cleanMetadataFailed: "内部IDを整理できませんでした。",
+		settingsLead: "アイデア、タスク、短い記録をすばやく保存して管理します。",
+		settingsHero: "言の葉を日々のノートに残し、検索、タグ、ふりかえりで見返せます。",
+		openMemo: "メモを開く",
+		languageSetting: "表示言語",
+		languageSettingDesc: "Kotonoha の表示言語です。自動では Obsidian の表示言語に合わせます。",
+		languageAuto: "自動",
+		languageJapanese: "日本語",
+		languageEnglish: "English",
+		featuresHeading: "機能",
+		basicFeature: "基本",
+		basicFeatureDesc: "メモの保存、編集、削除、復元",
+		saveFeature: "保存",
+		saveFeatureDesc: "保存先フォルダ、日次形式、見出し",
+		displayFeature: "表示",
+		displayFeatureDesc: "検索、タグ、期間、状態フィルタ",
+		editorFeature: "エディタ",
+		editorFeatureDesc: "選択範囲保存、複数行メモ",
+		reflectFeature: "ふりかえり",
+		reflectFeatureDesc: "ヒートマップ、ランダム表示、日次目標",
+		attachmentFeature: "添付",
+		attachmentFeatureDesc: "ファイル保存、リンク追加",
+		saveSettings: "保存設定",
+		captureToDailyNote: "デイリーノートに保存",
+		captureToDailyNoteDesc: "有効にすると、指定したデイリーノートファイルの見出し下にメモを追加します。",
+		dailyNoteFolder: "デイリーノート保存先フォルダ",
+		dailyNoteFolderDesc: "Obsidian のデイリーノート設定がある場合はそちらを優先します。未設定時の fallback です。",
+		dailyNoteFileName: "デイリーノートのファイル名",
+		dailyNoteFileNameDesc: "Obsidian のデイリーノート設定がある場合はそちらを優先します。Moment.js 形式です。",
+		dailyHeading: "日次ノートの見出し",
+		dailyHeadingDesc: "# や ## は入力不要です。この見出しの下にメモを追加します。",
+		insertNewMemoAtTop: "新しいメモを上に追加",
+		insertNewMemoAtTopDesc: "有効にすると、見出しの直下に最新メモを追加します。無効の場合は末尾に追加します。",
+		monthlyFolder: "月次保存フォルダ",
+		monthlyFolderDesc: "デイリーノート保存を無効にした場合に使う、vault 内の相対フォルダです。",
+		attachmentFolder: "添付ファイル保存フォルダ",
+		attachmentFolderDesc: "Kotonoha から添付したファイルを保存する vault 内の相対フォルダです。",
+		saveButtonLabel: "保存ボタンの表示名",
+		saveButtonLabelDesc: "下部入力欄の主ボタンに表示する短い言葉です。空欄にすると表示言語に合わせます。",
+		displaySettings: "表示設定",
+		showAdvancedControls: "詳細ツールを表示",
+		showAdvancedControlsDesc: "検索、絞り込み、統計、ヒートマップ、タグをタイムライン上部に表示します。無効時は書きやすさを優先します。",
+		reflectSettings: "ふりかえり設定",
+		dailyGoal: "1日の目標メモ数",
+		dailyGoalDesc: "今日の進捗バーに使います。",
+		randomReviewCount: "ふりかえりの件数",
+		randomReviewCountDesc: "ランダム表示で選ぶメモ数です。",
+		heatmapDays: "ヒートマップの日数",
+		heatmapDaysDesc: "タイムライン上部に表示する日数です。",
+		deleteModalTitle: "メモを完全に削除しますか？",
+		deleteModalDesc: "この操作は対象のメモ本文をノートから削除します。",
+		deleteAction: "削除",
+		yesterday: "昨日",
+	},
+	en: {
+		openKotonoha: "Open Kotonoha",
+		openTimelineCommand: "Open memo timeline",
+		captureSelectionCommand: "Save selection to memo timeline",
+		randomReviewCommand: "Show reflection",
+		cleanMetadataCommand: "Hide Kotonoha internal IDs in Daily Notes",
+		noSelection: "No selected text.",
+		emptyMemo: "Memo is empty.",
+		memoTooLong: "Memo is too long. Keep it within {count} characters.",
+		saveFailed: "Could not save: {message}",
+		saveFailedGeneric: "Could not save.",
+		savedDaily: "Saved to today's Daily Note.",
+		savedMonthly: "Saved to Kotonoha.",
+		protocolEmpty: "No memo text was provided from the URL.",
+		protocolTooLong: "URL capture text must be within {count} characters.",
+		attachmentTooMany: "You can attach up to {count} files at once.",
+		attachmentTooLarge: "Each attachment must be {mb}MB or smaller.",
+		attachmentSaveFailed: "Could not save attachments: {message}",
+		attachmentSaveFailedGeneric: "Could not save attachments.",
+		titleSubtitle: "Everyday words in Daily Notes",
+		search: "Search",
+		status: "Status",
+		normal: "Normal",
+		all: "All",
+		archive: "Archive",
+		trash: "Trash",
+		period: "Period",
+		allPeriod: "All time",
+		today: "Today",
+		sevenDays: "7 days",
+		thirtyDays: "30 days",
+		type: "Type",
+		memoAndTask: "Notes + tasks",
+		memoOnly: "Notes only",
+		openTask: "Open",
+		doneTask: "Done",
+		display: "View",
+		detailList: "Detailed list",
+		compact: "Compact",
+		cardGrid: "Card grid",
+		placeholder: "Write what you want to keep. Use [ ] for tasks and [x] for done.",
+		task: "Task",
+		attach: "Attach",
+		attachCount: "Attach {count}",
+		save: "Save",
+		saveTarget: "Target",
+		defaultTarget: "Default",
+		dailyTarget: "Daily",
+		monthlyTarget: "Monthly",
+		targetLine: "Target: {target} / {heading}",
+		targetDaily: "Today's Daily Note",
+		targetMonthly: "Monthly note",
+		reflect: "Reflect",
+		reflectRandom: "Random",
+		reflectToday: "Today",
+		reflectSevenDaysAgo: "7 days ago",
+		reload: "Reload",
+		hint: "Task: save as an open task / Attach: save to the vault and add links / Cmd/Ctrl+Enter: save",
+		noReviewMemos: "No memos to show.",
+		emptyNoMemos: "No words saved yet. Capture a thought for today.",
+		emptyFiltered: "No notes match these filters.",
+		activeCount: "Normal {count}",
+		todayCount: "Today {count}",
+		archiveCount: "Archived {count}",
+		openTaskCount: "Open {count}",
+		trashCount: "Trash {count}",
+		customDateChip: "Notes from {date}",
+		randomReviewChip: "Reflecting on {count}",
+		tagChip: "Tag {tag}",
+		clear: "Clear",
+		dailyProgress: "Today's progress {count}/{goal}",
+		heatmapTitle: "{date}: {count}",
+		pinnedPrefix: "Pinned / ",
+		backToOpen: "Mark open",
+		completeTask: "Complete task",
+		more: "…",
+		close: "Close",
+		edit: "Edit",
+		unpin: "Unpin",
+		pin: "Pin",
+		taskify: "Make task",
+		untask: "Remove task",
+		openNote: "Open note",
+		cancel: "Cancel",
+		restore: "Restore",
+		deletePermanently: "Delete permanently",
+		undo: "Undo",
+		undone: "Undone.",
+		undoFailed: "Could not undo.",
+		memoUpdated: "Memo updated.",
+		archivedNotice: "Archived.",
+		trashedNotice: "Moved to trash.",
+		restoredNotice: "Restored.",
+		pinnedNotice: "Pinned.",
+		unpinnedNotice: "Unpinned.",
+		taskDoneNotice: "Task completed.",
+		taskOpenNotice: "Task reopened.",
+		taskNoneNotice: "Removed task status.",
+		safeTargetError: "Could not safely identify the target memo. Reload and try again.",
+		deletedPermanentlyNotice: "Memo deleted permanently.",
+		deleteFailed: "Could not delete memo.",
+		updateFailed: "Could not update memo.",
+		undoTargetMissing: "Undo target memo was not found.",
+		cleanedMetadata: "Kotonoha internal IDs were cleaned up.",
+		noMetadataToClean: "No Kotonoha internal IDs to clean up.",
+		cleanMetadataFailed: "Could not clean up internal IDs.",
+		settingsLead: "Quickly save and manage ideas, tasks, and short notes.",
+		settingsHero: "Save everyday words to Daily Notes, then review them with search, tags, and reflections.",
+		openMemo: "Open memo",
+		languageSetting: "Display language",
+		languageSettingDesc: "Language used by Kotonoha. Auto follows Obsidian's display language.",
+		languageAuto: "Auto",
+		languageJapanese: "Japanese",
+		languageEnglish: "English",
+		featuresHeading: "Features",
+		basicFeature: "Basics",
+		basicFeatureDesc: "Save, edit, delete, and restore memos",
+		saveFeature: "Saving",
+		saveFeatureDesc: "Folders, Daily Note format, and headings",
+		displayFeature: "Display",
+		displayFeatureDesc: "Search, tags, date, and status filters",
+		editorFeature: "Editor",
+		editorFeatureDesc: "Selection capture and multiline memos",
+		reflectFeature: "Reflect",
+		reflectFeatureDesc: "Heatmap, random picks, and daily goal",
+		attachmentFeature: "Attachments",
+		attachmentFeatureDesc: "File saving and link insertion",
+		saveSettings: "Saving",
+		captureToDailyNote: "Save to Daily Notes",
+		captureToDailyNoteDesc: "When enabled, add memos under the configured heading in the Daily Note.",
+		dailyNoteFolder: "Daily Note folder",
+		dailyNoteFolderDesc: "Kotonoha uses Obsidian's Daily Notes settings when available. This is the fallback folder.",
+		dailyNoteFileName: "Daily Note file name",
+		dailyNoteFileNameDesc: "Kotonoha uses Obsidian's Daily Notes settings when available. Uses Moment.js format.",
+		dailyHeading: "Daily Note heading",
+		dailyHeadingDesc: "Do not include # or ##. Memos are added under this heading.",
+		insertNewMemoAtTop: "Add new memos at the top",
+		insertNewMemoAtTopDesc: "When enabled, new memos are inserted directly under the heading. Otherwise they are appended at the end.",
+		monthlyFolder: "Monthly memo folder",
+		monthlyFolderDesc: "Vault-relative folder used when Daily Note saving is disabled.",
+		attachmentFolder: "Attachment folder",
+		attachmentFolderDesc: "Vault-relative folder for files attached from Kotonoha.",
+		saveButtonLabel: "Save button label",
+		saveButtonLabelDesc: "Short label for the primary button in the bottom input. Leave empty to follow the display language.",
+		displaySettings: "Display",
+		showAdvancedControls: "Show advanced tools",
+		showAdvancedControlsDesc: "Show search, filters, stats, heatmap, and tags above the timeline. Disable this to prioritize writing.",
+		reflectSettings: "Reflection",
+		dailyGoal: "Daily memo goal",
+		dailyGoalDesc: "Used by today's progress bar.",
+		randomReviewCount: "Reflection count",
+		randomReviewCountDesc: "Number of memos selected for random reflection.",
+		heatmapDays: "Heatmap days",
+		heatmapDaysDesc: "Number of days shown above the timeline.",
+		deleteModalTitle: "Delete this memo permanently?",
+		deleteModalDesc: "This removes the memo text from the note.",
+		deleteAction: "Delete",
+		yesterday: "Yesterday",
+	},
+} as const;
+
+type TranslationKey = keyof typeof TRANSLATIONS.ja;
+
 export default class KotonohaPlugin extends Plugin {
 	settings: KotonohaSettings = DEFAULT_SETTINGS;
 	dailyNotesSettings: DailyNotesSettings | null = null;
@@ -101,13 +430,13 @@ export default class KotonohaPlugin extends Plugin {
 			(leaf) => new KotonohaView(leaf, this)
 		);
 
-		this.addRibbonIcon("message-square-plus", "Kotonoha を開く", () => {
+		this.addRibbonIcon("message-square-plus", this.t("openKotonoha"), () => {
 			void this.activateView();
 		});
 
 		this.addCommand({
 			id: "open",
-			name: "メモタイムラインを開く",
+			name: this.t("openTimelineCommand"),
 			callback: () => {
 				void this.activateView();
 			},
@@ -115,11 +444,11 @@ export default class KotonohaPlugin extends Plugin {
 
 		this.addCommand({
 			id: "capture-selection",
-			name: "選択範囲をメモタイムラインに保存",
+			name: this.t("captureSelectionCommand"),
 			editorCallback: async (editor) => {
 				const selected = editor.getSelection().trim();
 				if (!selected) {
-					new Notice("選択中のテキストがありません。");
+					new Notice(this.t("noSelection"));
 					return;
 				}
 				await this.captureMemo(selected);
@@ -128,12 +457,20 @@ export default class KotonohaPlugin extends Plugin {
 
 		this.addCommand({
 			id: "random-review",
-			name: "ランダムにメモを表示",
+			name: this.t("randomReviewCommand"),
 			callback: () => {
 				void (async () => {
 					await this.activateView();
 					this.getOpenViews().forEach((view) => view.pickRandomMemo());
 				})();
+			},
+		});
+
+		this.addCommand({
+			id: "clean-visible-metadata",
+			name: this.t("cleanMetadataCommand"),
+			callback: () => {
+				void this.cleanVisibleMetadata();
 			},
 		});
 
@@ -157,6 +494,7 @@ export default class KotonohaPlugin extends Plugin {
 		const loaded = asLoadedSettings(await this.loadData());
 		this.settings = {
 			memoFolder: normalizeFolder(getStringSetting(loaded, "memoFolder", DEFAULT_SETTINGS.memoFolder)),
+			language: normalizeLanguageSetting(getOptionalStringSetting(loaded, "language")),
 			dailyNoteFolder: normalizeOptionalFolder(getStringSetting(loaded, "dailyNoteFolder", DEFAULT_SETTINGS.dailyNoteFolder)),
 			dailyNoteFileFormat: getStringSetting(loaded, "dailyNoteFileFormat", DEFAULT_SETTINGS.dailyNoteFileFormat).trim() || DEFAULT_SETTINGS.dailyNoteFileFormat,
 			dateFormat: getStringSetting(loaded, "dateFormat", DEFAULT_SETTINGS.dateFormat).trim() || DEFAULT_SETTINGS.dateFormat,
@@ -180,14 +518,44 @@ export default class KotonohaPlugin extends Plugin {
 		await this.saveData(this.settings);
 	}
 
+	get language(): KotonohaLanguage {
+		return getDisplayLanguage(this.settings.language);
+	}
+
+	t(key: TranslationKey, params: Record<string, string | number> = {}): string {
+		return translate(key, this.language, params);
+	}
+
 	async captureMemo(rawContent: string) {
 		await this.captureMemoToTarget(rawContent, "default");
+	}
+
+	async cleanVisibleMetadata() {
+		let changed = 0;
+		try {
+			for (const file of await this.getSourceFiles()) {
+				await this.app.vault.process(file, (raw) => {
+					const cleaned = removeRedundantMetadata(raw, this.settings.captureToDailyNote ? this.settings.dailyHeading : null);
+					if (cleaned === raw) return raw;
+					changed += 1;
+					return cleaned;
+				});
+			}
+			if (changed > 0) {
+				new Notice(this.t("cleanedMetadata"));
+				this.refreshOpenViews();
+			} else {
+				new Notice(this.t("noMetadataToClean"));
+			}
+		} catch (error) {
+			new Notice(error instanceof Error ? error.message : this.t("cleanMetadataFailed"));
+		}
 	}
 
 	async saveAttachments(files: File[]): Promise<AttachmentSaveResult> {
 		if (files.length === 0) return { links: [], paths: [] };
 		if (files.length > MAX_ATTACHMENT_FILES) {
-			throw new Error(`添付できるファイルは一度に${MAX_ATTACHMENT_FILES}個までです。`);
+			throw new Error(this.t("attachmentTooMany", { count: MAX_ATTACHMENT_FILES }));
 		}
 
 		const folder = normalizeFolder(this.settings.attachmentFolder);
@@ -198,7 +566,7 @@ export default class KotonohaPlugin extends Plugin {
 		try {
 			for (const file of files) {
 				if (file.size > MAX_ATTACHMENT_BYTES) {
-					throw new Error(`添付ファイルは1つ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MBまでです。`);
+					throw new Error(this.t("attachmentTooLarge", { mb: Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024) }));
 				}
 				const path = this.getAvailableAttachmentPath(folder, sanitizeAttachmentName(file.name));
 				await this.app.vault.createBinary(path, await file.arrayBuffer());
@@ -237,41 +605,42 @@ export default class KotonohaPlugin extends Plugin {
 		return path;
 	}
 
-	async captureMemoToTarget(rawContent: string, target: SaveTarget, forcedTaskStatus?: TaskStatus): Promise<boolean> {
+	async captureMemoToTarget(rawContent: string, target: SaveTarget, forcedTaskStatus?: TaskStatus): Promise<CaptureResult | null> {
 		const content = rawContent.trim();
 		if (!content) {
-			new Notice("メモが空です。");
-			return false;
+			new Notice(this.t("emptyMemo"));
+			return null;
 		}
 		if (content.length > MAX_MEMO_CONTENT_LENGTH) {
-			new Notice(`メモが長すぎます。${MAX_MEMO_CONTENT_LENGTH}文字以内にしてください。`);
-			return false;
+			new Notice(this.t("memoTooLong", { count: MAX_MEMO_CONTENT_LENGTH }));
+			return null;
 		}
 
+		let result: CaptureResult;
 		try {
 			if (target === "daily" || (target === "default" && this.settings.captureToDailyNote)) {
-				await this.appendToDailyNote(content, forcedTaskStatus);
+				result = await this.appendToDailyNote(content, forcedTaskStatus);
 			} else {
-				await this.appendToMonthlyMemoFile(content, forcedTaskStatus);
+				result = await this.appendToMonthlyMemoFile(content, forcedTaskStatus);
 			}
 		} catch (error) {
-			new Notice(error instanceof Error ? `保存できませんでした: ${error.message}` : "保存できませんでした。");
-			return false;
+			new Notice(error instanceof Error ? this.t("saveFailed", { message: error.message }) : this.t("saveFailedGeneric"));
+			return null;
 		}
 
-		new Notice("Kotonoha に保存しました。");
+		new Notice(result.target === "daily" ? this.t("savedDaily") : this.t("savedMonthly"));
 		this.refreshOpenViews();
-		return true;
+		return result;
 	}
 
 	async handleProtocolCapture(params: Record<string, string>) {
 		const content = (params.text || params.content || params.body || "").toString().trim();
 		if (!content) {
-			new Notice("URL から保存するメモ本文がありません。");
+			new Notice(this.t("protocolEmpty"));
 			return;
 		}
 		if (content.length > MAX_PROTOCOL_CONTENT_LENGTH) {
-			new Notice(`URL から保存できる本文は${MAX_PROTOCOL_CONTENT_LENGTH}文字までです。`);
+			new Notice(this.t("protocolTooLong", { count: MAX_PROTOCOL_CONTENT_LENGTH }));
 			return;
 		}
 
@@ -284,21 +653,23 @@ export default class KotonohaPlugin extends Plugin {
 		}
 	}
 
-	async appendToMonthlyMemoFile(content: string, forcedTaskStatus?: TaskStatus) {
+	async appendToMonthlyMemoFile(content: string, forcedTaskStatus?: TaskStatus): Promise<CaptureResult> {
 		const folder = normalizeFolder(this.settings.memoFolder);
 		await ensureFolder(this.app, folder);
 		const path = `${folder}/${moment().format("YYYY-MM")}.md`;
 		const file = await getOrCreateFile(this.app, path, `# ${moment().format("YYYY-MM")}\n\n`);
 		const line = this.formatMemoLine(content, true, forcedTaskStatus);
 		await this.app.vault.append(file, `${line}\n`);
+		return { path, target: "monthly" };
 	}
 
-	async appendToDailyNote(content: string, forcedTaskStatus?: TaskStatus) {
+	async appendToDailyNote(content: string, forcedTaskStatus?: TaskStatus): Promise<CaptureResult> {
 		const dailyNote = await this.resolveDailyNote();
 		const file = await getOrCreateFile(this.app, dailyNote.path, dailyNote.initialContent);
 		const raw = await this.app.vault.read(file);
 		const updated = upsertUnderHeading(raw, this.settings.dailyHeading, this.formatMemoLine(content, false, forcedTaskStatus), this.settings.insertNewMemoAtTop);
 		await this.app.vault.modify(file, updated);
+		return { path: dailyNote.path, target: "daily" };
 	}
 
 	async resolveDailyNote(): Promise<{ path: string; initialContent: string }> {
@@ -333,7 +704,7 @@ export default class KotonohaPlugin extends Plugin {
 		const parsed = extractTaskInput(content);
 		const escaped = parsed.content.replace(/\n/g, "\n  ");
 		const taskStatus = forcedTaskStatus ?? parsed.taskStatus;
-		return serializeMemoBlock(generateMemoId(), `${date}${time}`.trim(), escaped, "active", false, taskStatus);
+		return serializeMemoBlock(null, `${date}${time}`.trim(), escaped, "active", false, taskStatus);
 	}
 
 	async loadMemos(): Promise<MemoItem[]> {
@@ -366,26 +737,26 @@ export default class KotonohaPlugin extends Plugin {
 	}
 
 	async updateMemoContent(memo: MemoItem, content: string) {
-		if (await this.replaceMemoBlock(memo, content.trim(), memo.status, memo.pinned, memo.taskStatus, "メモを更新しました。")) {
+		if (await this.replaceMemoBlock(memo, content.trim(), memo.status, memo.pinned, memo.taskStatus, this.t("memoUpdated"))) {
 			this.refreshOpenViews();
 		}
 	}
 
 	async updateMemoStatus(memo: MemoItem, status: MemoStatus) {
-		const label = status === "archived" ? "アーカイブしました。" : status === "deleted" ? "ゴミ箱に移動しました。" : "復元しました。";
+		const label = status === "archived" ? this.t("archivedNotice") : status === "deleted" ? this.t("trashedNotice") : this.t("restoredNotice");
 		if (await this.replaceMemoBlock(memo, memo.content, status, memo.pinned, memo.taskStatus, label)) {
 			this.refreshOpenViews();
 		}
 	}
 
 	async updateMemoPinned(memo: MemoItem, pinned: boolean) {
-		if (await this.replaceMemoBlock(memo, memo.content, memo.status, pinned, memo.taskStatus, pinned ? "ピン留めしました。" : "ピン留めを解除しました。")) {
+		if (await this.replaceMemoBlock(memo, memo.content, memo.status, pinned, memo.taskStatus, pinned ? this.t("pinnedNotice") : this.t("unpinnedNotice"))) {
 			this.refreshOpenViews();
 		}
 	}
 
 	async updateMemoTaskStatus(memo: MemoItem, taskStatus: TaskStatus) {
-		const label = taskStatus === "done" ? "タスクを完了にしました。" : taskStatus === "open" ? "タスクを未完了にしました。" : "タスク扱いを解除しました。";
+		const label = taskStatus === "done" ? this.t("taskDoneNotice") : taskStatus === "open" ? this.t("taskOpenNotice") : this.t("taskNoneNotice");
 		if (await this.replaceMemoBlock(memo, memo.content, memo.status, memo.pinned, taskStatus, label)) {
 			this.refreshOpenViews();
 		}
@@ -399,14 +770,14 @@ export default class KotonohaPlugin extends Plugin {
 		try {
 			await this.app.vault.process(file, (raw) => {
 				const target = findCurrentMemo(raw, memo, this.settings.captureToDailyNote ? this.settings.dailyHeading : null);
-				if (!target) throw new Error("対象のメモを安全に特定できませんでした。再読み込みしてから試してください。");
+				if (!target) throw new Error(this.t("safeTargetError"));
 				const lines = raw.split(/\r?\n/);
 				deletedStartLine = target.startLine;
 				deletedBlock = lines.slice(target.startLine, target.endLine + 1);
 				lines.splice(target.startLine, target.endLine - target.startLine + 1);
 				return lines.join("\n");
 			});
-			this.showUndoNotice("メモを完全に削除しました。", async () => {
+			this.showUndoNotice(this.t("deletedPermanentlyNotice"), async () => {
 				await this.app.vault.process(file, (raw) => {
 					const blockText = deletedBlock.join("\n");
 					if (raw.includes(blockText)) return raw;
@@ -417,26 +788,32 @@ export default class KotonohaPlugin extends Plugin {
 			});
 			this.refreshOpenViews();
 		} catch (error) {
-			new Notice(error instanceof Error ? error.message : "メモを削除できませんでした。");
+			new Notice(error instanceof Error ? error.message : this.t("deleteFailed"));
 		}
 	}
 
 	async replaceMemoBlock(memo: MemoItem, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus, successMessage: string): Promise<boolean> {
 		if (!content) {
-			new Notice("メモが空です。");
+			new Notice(this.t("emptyMemo"));
 			return false;
 		}
 		const file = this.app.vault.getAbstractFileByPath(memo.filePath);
 		if (!(file instanceof TFile)) return false;
 		let previousBlock: string[] = [];
-		let updatedStorageId = "";
+		let updatedStorageId: string | null = null;
+		let updatedFallback: { createdAt: string; content: string; taskStatus: TaskStatus; status: MemoStatus; pinned: boolean } | null = null;
 		try {
 			await this.app.vault.process(file, (raw) => {
 				const target = findCurrentMemo(raw, memo, this.settings.captureToDailyNote ? this.settings.dailyHeading : null);
-				if (!target) throw new Error("対象のメモを安全に特定できませんでした。再読み込みしてから試してください。");
+				if (!target) throw new Error(this.t("safeTargetError"));
 				const lines = raw.split(/\r?\n/);
-				const storageId = target.storageId ?? memo.storageId ?? generateMemoId();
+				const needsMetadata = status !== "active" || pinned;
+				const storageId = needsMetadata ? target.storageId ?? memo.storageId ?? generateMemoId() : target.storageId ?? memo.storageId;
 				updatedStorageId = storageId;
+				const nextCreatedAt = /^\d{4}-\d{2}-\d{2}\s+/.test(target.timestampText)
+					? target.timestampText
+					: `${inferDateFromPath(memo.filePath)} ${target.timestampText}`;
+				updatedFallback = { createdAt: nextCreatedAt, content, taskStatus, status, pinned };
 				previousBlock = lines.slice(target.startLine, target.endLine + 1);
 				const nextBlock = serializeMemoBlock(storageId, target.timestampText, content, status, pinned, taskStatus).split("\n");
 				lines.splice(target.startLine, target.endLine - target.startLine + 1, ...nextBlock);
@@ -444,12 +821,22 @@ export default class KotonohaPlugin extends Plugin {
 			});
 			this.showUndoNotice(successMessage, async () => {
 				await this.app.vault.process(file, (raw) => {
-					const current = parseMemoItems(
+					const candidates = parseMemoItems(
 						raw,
 						memo.filePath,
 						this.settings.captureToDailyNote ? this.settings.dailyHeading : null
-					).find((candidate) => candidate.storageId === updatedStorageId);
-					if (!current) throw new Error("Undo対象のメモが見つかりません。");
+					);
+					const current = updatedStorageId
+						? candidates.find((candidate) => candidate.storageId === updatedStorageId)
+						: candidates.find((candidate) =>
+							updatedFallback !== null &&
+							candidate.createdAt === updatedFallback.createdAt &&
+							candidate.content === updatedFallback.content &&
+							candidate.taskStatus === updatedFallback.taskStatus &&
+							candidate.status === updatedFallback.status &&
+							candidate.pinned === updatedFallback.pinned
+						);
+					if (!current) throw new Error(this.t("undoTargetMissing"));
 					const lines = raw.split(/\r?\n/);
 					lines.splice(current.startLine, current.endLine - current.startLine + 1, ...previousBlock);
 					return lines.join("\n");
@@ -457,23 +844,23 @@ export default class KotonohaPlugin extends Plugin {
 			});
 			return true;
 		} catch (error) {
-			new Notice(error instanceof Error ? error.message : "メモを更新できませんでした。");
+			new Notice(error instanceof Error ? error.message : this.t("updateFailed"));
 			return false;
 		}
 	}
 
 	showUndoNotice(message: string, undo: () => Promise<void>) {
 		const notice = new Notice(message, 7000);
-		const undoButton = notice.messageEl.createEl("button", { text: "元に戻す" });
+		const undoButton = notice.messageEl.createEl("button", { text: this.t("undo") });
 		undoButton.addEventListener("click", () => {
 			void (async () => {
 				try {
 					await undo();
 					notice.hide();
 					this.refreshOpenViews();
-					new Notice("元に戻しました。");
+					new Notice(this.t("undone"));
 				} catch (error) {
-					new Notice(error instanceof Error ? error.message : "元に戻せませんでした。");
+					new Notice(error instanceof Error ? error.message : this.t("undoFailed"));
 				}
 			})();
 		});
@@ -551,14 +938,14 @@ class KotonohaView extends ItemView {
 		const header = root.createDiv({ cls: "kotonoha-header" });
 		const title = header.createDiv();
 		title.createDiv({ cls: "kotonoha-title", text: "Kotonoha" });
-		title.createEl("p", { text: "言の葉を日々のノートに残す" });
+		title.createEl("p", { text: this.plugin.t("titleSubtitle") });
 
 		this.searchEl = null;
 
 		if (this.plugin.settings.showAdvancedControls) {
 			const search = root.createEl("input", {
 				cls: "kotonoha-search",
-				attr: { type: "search", placeholder: "検索" },
+				attr: { type: "search", placeholder: this.plugin.t("search") },
 			});
 			this.searchEl = search;
 			search.addEventListener("input", () => {
@@ -569,22 +956,22 @@ class KotonohaView extends ItemView {
 
 			const controls = root.createDiv({ cls: "kotonoha-control-stack" });
 
-			this.renderSegmented(this.createControlRow(controls, "状態"), [
-				["active", "通常"],
-				["all", "すべて"],
-				["archived", "アーカイブ"],
-				["deleted", "ゴミ箱"],
+			this.renderSegmented(this.createControlRow(controls, this.plugin.t("status")), [
+				["active", this.plugin.t("normal")],
+				["all", this.plugin.t("all")],
+				["archived", this.plugin.t("archive")],
+				["deleted", this.plugin.t("trash")],
 			] as [StatusFilter, string][], (value) => {
 				this.statusFilter = value;
 				this.clearRandomReview();
 				void this.renderList();
 			}, "status");
 
-			this.renderSegmented(this.createControlRow(controls, "期間"), [
-				["all", "全期間"],
-				["today", "今日"],
-				["week", "7日"],
-				["month", "30日"],
+			this.renderSegmented(this.createControlRow(controls, this.plugin.t("period")), [
+				["all", this.plugin.t("allPeriod")],
+				["today", this.plugin.t("today")],
+				["week", this.plugin.t("sevenDays")],
+				["month", this.plugin.t("thirtyDays")],
 			] as [DateFilter, string][], (value) => {
 				this.dateFilter = value;
 				if (value !== "custom") this.selectedDate = "";
@@ -592,21 +979,21 @@ class KotonohaView extends ItemView {
 				void this.renderList();
 			}, "date");
 
-			this.renderSegmented(this.createControlRow(controls, "種類"), [
-				["all", "メモ+タスク"],
-				["memo", "メモのみ"],
-				["open", "未完了"],
-				["done", "完了"],
+			this.renderSegmented(this.createControlRow(controls, this.plugin.t("type")), [
+				["all", this.plugin.t("memoAndTask")],
+				["memo", this.plugin.t("memoOnly")],
+				["open", this.plugin.t("openTask")],
+				["done", this.plugin.t("doneTask")],
 			] as [TaskFilter, string][], (value) => {
 				this.taskFilter = value;
 				this.clearRandomReview();
 				void this.renderList();
 			}, "task");
 
-			this.renderSegmented(this.createControlRow(controls, "表示"), [
-				["list", "詳細リスト"],
-				["compact", "圧縮"],
-				["grid", "カードグリッド"],
+			this.renderSegmented(this.createControlRow(controls, this.plugin.t("display")), [
+				["list", this.plugin.t("detailList")],
+				["compact", this.plugin.t("compact")],
+				["grid", this.plugin.t("cardGrid")],
 			] as [ViewLayout, string][], (value) => {
 				this.viewLayout = value;
 				void this.renderList();
@@ -627,7 +1014,7 @@ class KotonohaView extends ItemView {
 		const capture = root.createDiv({ cls: "kotonoha-capture" });
 		const input = capture.createEl("textarea", {
 			cls: "kotonoha-input",
-			attr: { placeholder: "いま残したいことを書く。[ ] で未完了、[x] で完了。" },
+			attr: { placeholder: this.plugin.t("placeholder") },
 		});
 		this.inputEl = input;
 		input.value = this.plugin.settings.draftContent;
@@ -635,17 +1022,23 @@ class KotonohaView extends ItemView {
 		this.saveTarget = this.plugin.settings.draftSaveTarget;
 
 		const actions = capture.createDiv({ cls: "kotonoha-actions" });
-		const taskButton = actions.createEl("button", { text: "タスク" });
-		const attachButton = actions.createEl("button", { text: "添付" });
-		const saveButton = actions.createEl("button", { text: this.plugin.settings.saveButtonLabel, cls: "kotonoha-primary-button" });
+		const taskButton = actions.createEl("button", { text: this.plugin.t("task") });
+		const attachButton = actions.createEl("button", { text: this.plugin.t("attach") });
+		const saveButton = actions.createEl("button", { text: this.getSaveButtonText(), cls: "kotonoha-primary-button" });
 		const fileInput = capture.createEl("input", {
 			cls: "kotonoha-file-input",
 			attr: { type: "file", multiple: "true" },
 		});
 
+		const targetLine = capture.createDiv({ cls: "kotonoha-target-line" });
+
 		const updateCaptureButtons = () => {
 			taskButton.toggleClass("is-active", this.taskCapture);
-			attachButton.setText(this.attachmentFiles.length > 0 ? `添付 ${this.attachmentFiles.length}` : "添付");
+			attachButton.setText(this.attachmentFiles.length > 0 ? this.plugin.t("attachCount", { count: this.attachmentFiles.length }) : this.plugin.t("attach"));
+			const hasContent = input.value.trim().length > 0 || this.attachmentFiles.length > 0;
+			saveButton.disabled = !hasContent;
+			saveButton.toggleClass("is-disabled", !hasContent);
+			targetLine.setText(this.plugin.t("targetLine", { target: this.getTargetLabel(), heading: this.plugin.settings.dailyHeading }));
 		};
 
 		const saveCapture = async () => {
@@ -664,7 +1057,7 @@ class KotonohaView extends ItemView {
 				await this.clearDraft();
 				updateCaptureButtons();
 			} catch (error) {
-				new Notice(error instanceof Error ? `添付を保存できませんでした: ${error.message}` : "添付を保存できませんでした。");
+				new Notice(error instanceof Error ? this.plugin.t("attachmentSaveFailed", { message: error.message }) : this.plugin.t("attachmentSaveFailedGeneric"));
 			}
 		};
 
@@ -679,8 +1072,12 @@ class KotonohaView extends ItemView {
 		fileInput.addEventListener("change", () => {
 			this.attachmentFiles = Array.from(fileInput.files ?? []);
 			updateCaptureButtons();
+			this.scheduleDraftSave();
 		});
-		input.addEventListener("input", () => this.scheduleDraftSave());
+		input.addEventListener("input", () => {
+			updateCaptureButtons();
+			this.scheduleDraftSave();
+		});
 		input.addEventListener("keydown", (event) => {
 			if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
 				event.preventDefault();
@@ -690,10 +1087,10 @@ class KotonohaView extends ItemView {
 		updateCaptureButtons();
 
 		if (this.plugin.settings.showAdvancedControls) {
-			this.renderSegmented(this.createControlRow(capture, "保存先"), [
-				["default", "設定通り"],
-				["daily", "日次"],
-				["monthly", "月次"],
+			this.renderSegmented(this.createControlRow(capture, this.plugin.t("saveTarget")), [
+				["default", this.plugin.t("defaultTarget")],
+				["daily", this.plugin.t("dailyTarget")],
+				["monthly", this.plugin.t("monthlyTarget")],
 			] as [SaveTarget, string][], (value) => {
 				this.saveTarget = value;
 				this.updateFilterButtonStates();
@@ -701,10 +1098,24 @@ class KotonohaView extends ItemView {
 			}, "save");
 
 			const secondaryActions = capture.createDiv({ cls: "kotonoha-secondary-actions" });
-			secondaryActions.createEl("button", { text: "回顧" }).addEventListener("click", () => this.pickRandomMemo());
-			secondaryActions.createEl("button", { text: "再読み込み" }).addEventListener("click", () => void this.reload());
+			secondaryActions.createEl("button", { text: this.plugin.t("reflectRandom") }).addEventListener("click", () => this.pickReviewMemo("random"));
+			secondaryActions.createEl("button", { text: this.plugin.t("reflectToday") }).addEventListener("click", () => this.pickReviewMemo("today"));
+			secondaryActions.createEl("button", { text: this.plugin.t("reflectSevenDaysAgo") }).addEventListener("click", () => this.pickReviewMemo("sevenDaysAgo"));
+			secondaryActions.createEl("button", { text: this.plugin.t("reload") }).addEventListener("click", () => void this.reload());
 		}
-		capture.createDiv({ cls: "kotonoha-hint", text: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Cmd/Ctrl+Enter: 保存" });
+		capture.createDiv({ cls: "kotonoha-hint", text: this.plugin.t("hint") });
+	}
+
+	getSaveButtonText(): string {
+		const label = this.plugin.settings.saveButtonLabel.trim();
+		return label && label !== DEFAULT_SETTINGS.saveButtonLabel ? label : this.plugin.t("save");
+	}
+
+	getTargetLabel(): string {
+		if (this.saveTarget === "monthly" || (this.saveTarget === "default" && !this.plugin.settings.captureToDailyNote)) {
+			return this.plugin.t("targetMonthly");
+		}
+		return this.plugin.t("targetDaily");
 	}
 
 	scheduleDraftSave() {
@@ -769,9 +1180,28 @@ class KotonohaView extends ItemView {
 	}
 
 	pickRandomMemo() {
+		this.pickReviewMemo("random");
+	}
+
+	pickReviewMemo(mode: ReviewMode) {
+		if (mode === "today") {
+			this.dateFilter = "today";
+			this.selectedDate = "";
+			this.randomMemoIds.clear();
+			void this.renderList();
+			return;
+		}
+		if (mode === "sevenDaysAgo") {
+			this.dateFilter = "custom";
+			this.selectedDate = moment().subtract(7, "days").format("YYYY-MM-DD");
+			this.randomMemoIds.clear();
+			void this.renderList();
+			return;
+		}
+
 		const candidates = this.getFilteredMemos(false);
 		if (candidates.length === 0) {
-			new Notice("表示できるメモがありません。");
+			new Notice(this.plugin.t("noReviewMemos"));
 			return;
 		}
 		const shuffled = [...candidates].sort(() => Math.random() - 0.5);
@@ -801,7 +1231,10 @@ class KotonohaView extends ItemView {
 		const filtered = this.getFilteredMemos(true);
 
 		if (filtered.length === 0) {
-			list.createDiv({ cls: "kotonoha-empty", text: this.memos.length === 0 ? "メモはまだありません。" : "この条件に合うメモはありません。" });
+			const empty = list.createDiv({ cls: "kotonoha-empty" });
+			empty.createDiv({ cls: "kotonoha-empty-title", text: this.memos.length === 0 ? this.plugin.t("emptyNoMemos") : this.plugin.t("emptyFiltered") });
+			const focusButton = empty.createEl("button", { text: this.plugin.t("save") });
+			focusButton.addEventListener("click", () => this.inputEl?.focus());
 			return;
 		}
 
@@ -812,7 +1245,7 @@ class KotonohaView extends ItemView {
 				currentDate = memoDate;
 				list.createDiv({
 					cls: "kotonoha-date-heading",
-					text: formatDateGroupLabel(memoDate),
+					text: formatDateGroupLabel(memoDate, this.plugin.language),
 				});
 			}
 			await this.renderMemoCard(list, memo);
@@ -841,11 +1274,11 @@ class KotonohaView extends ItemView {
 		const archivedCount = this.memos.filter((memo) => memo.status === "archived").length;
 		const deletedCount = this.memos.filter((memo) => memo.status === "deleted").length;
 		const openTaskCount = active.filter((memo) => memo.taskStatus === "open").length;
-		stats.createSpan({ text: `通常 ${active.length}` });
-		stats.createSpan({ text: `今日 ${todayCount}` });
-		stats.createSpan({ text: `アーカイブ ${archivedCount}` });
-		stats.createSpan({ text: `未完了 ${openTaskCount}` });
-		stats.createSpan({ text: `ゴミ箱 ${deletedCount}` });
+		stats.createSpan({ text: this.plugin.t("activeCount", { count: active.length }) });
+		stats.createSpan({ text: this.plugin.t("todayCount", { count: todayCount }) });
+		stats.createSpan({ text: this.plugin.t("archiveCount", { count: archivedCount }) });
+		stats.createSpan({ text: this.plugin.t("openTaskCount", { count: openTaskCount }) });
+		stats.createSpan({ text: this.plugin.t("trashCount", { count: deletedCount }) });
 	}
 
 	renderContext(context: HTMLElement) {
@@ -853,7 +1286,7 @@ class KotonohaView extends ItemView {
 		const chips: { label: string; onClear?: () => void }[] = [];
 		if (this.dateFilter === "custom" && this.selectedDate) {
 			chips.push({
-				label: `${this.selectedDate} のメモ`,
+				label: this.plugin.t("customDateChip", { date: this.selectedDate }),
 				onClear: () => {
 					this.dateFilter = "all";
 					this.selectedDate = "";
@@ -863,7 +1296,7 @@ class KotonohaView extends ItemView {
 		}
 		if (this.randomMemoIds.size > 0) {
 			chips.push({
-				label: `ランダム回顧 ${this.randomMemoIds.size}件`,
+				label: this.plugin.t("randomReviewChip", { count: this.randomMemoIds.size }),
 				onClear: () => {
 					this.clearRandomReview();
 					void this.renderList();
@@ -872,7 +1305,7 @@ class KotonohaView extends ItemView {
 		}
 		if (this.activeTag) {
 			chips.push({
-				label: `タグ ${this.activeTag}`,
+				label: this.plugin.t("tagChip", { tag: this.activeTag }),
 				onClear: () => {
 					this.activeTag = "";
 					void this.renderList();
@@ -894,7 +1327,7 @@ class KotonohaView extends ItemView {
 		const count = this.memos.filter((memo) => memo.status === "active" && memo.createdAt.startsWith(today)).length;
 		const percent = Math.min(100, Math.round((count / goal) * 100));
 		const label = progress.createDiv({ cls: "kotonoha-progress-label" });
-		label.createSpan({ text: `今日の進捗 ${count}/${goal}` });
+		label.createSpan({ text: this.plugin.t("dailyProgress", { count, goal }) });
 		label.createSpan({ text: `${percent}%` });
 		const track = progress.createDiv({ cls: "kotonoha-progress-track" });
 		const bar = track.createDiv({ cls: "kotonoha-progress-bar" });
@@ -916,7 +1349,7 @@ class KotonohaView extends ItemView {
 			const cell = heatmap.createEl("button", {
 				text: String(count || ""),
 				cls: `kotonoha-heatmap-cell level-${level}${this.selectedDate === key ? " is-active" : ""}`,
-				attr: { title: `${key}: ${count}件` },
+				attr: { title: this.plugin.t("heatmapTitle", { date: key, count }) },
 			});
 			cell.addEventListener("click", () => {
 				this.dateFilter = "custom";
@@ -942,7 +1375,7 @@ class KotonohaView extends ItemView {
 		const visible = this.getFilteredMemos(false);
 		const tags = Array.from(new Set(visible.flatMap((memo) => memo.tags))).sort();
 		if (this.activeTag) {
-			tagBar.createEl("button", { text: "解除", cls: "kotonoha-tag is-active" }).addEventListener("click", () => {
+			tagBar.createEl("button", { text: this.plugin.t("clear"), cls: "kotonoha-tag is-active" }).addEventListener("click", () => {
 				this.activeTag = "";
 				this.clearRandomReview();
 				void this.renderList();
@@ -967,7 +1400,14 @@ class KotonohaView extends ItemView {
 		if (memo.pinned) item.addClass("is-pinned");
 
 		const meta = item.createDiv({ cls: "kotonoha-meta" });
-		meta.createSpan({ text: `${memo.pinned ? "固定 / " : ""}${formatMemoMetaTime(memo)}` });
+		const openNoteButton = meta.createEl("button", {
+			text: `${memo.pinned ? this.plugin.t("pinnedPrefix") : ""}${formatMemoMetaTime(memo)}`,
+			cls: "kotonoha-open-note-link",
+			attr: { title: this.plugin.t("openNote") },
+		});
+		openNoteButton.addEventListener("click", () => {
+			void this.openMemoNote(memo);
+		});
 		if (this.plugin.settings.showAdvancedControls) {
 			const fileLink = meta.createEl("a", { text: memo.filePath });
 			fileLink.addEventListener("click", (event) => {
@@ -986,7 +1426,7 @@ class KotonohaView extends ItemView {
 			const taskToggle = contentRow.createEl("button", {
 				text: memo.taskStatus === "done" ? "✓" : "□",
 				cls: "kotonoha-task-indicator",
-				attr: { title: memo.taskStatus === "done" ? "未完了に戻す" : "タスク完了" },
+				attr: { title: memo.taskStatus === "done" ? this.plugin.t("backToOpen") : this.plugin.t("completeTask") },
 			});
 			taskToggle.addEventListener("click", () => {
 				void this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "done" ? "open" : "done");
@@ -1001,22 +1441,25 @@ class KotonohaView extends ItemView {
 		editBox.hide();
 
 		const actions = item.createDiv({ cls: "kotonoha-card-actions" });
-		const moreButton = actions.createEl("button", { text: "…" });
+		const moreButton = actions.createEl("button", { text: this.plugin.t("more") });
 		const detailActions = item.createDiv({ cls: "kotonoha-card-detail-actions" });
 		detailActions.hide();
 
-		const editButton = detailActions.createEl("button", { text: "編集" });
-		detailActions.createEl("button", { text: memo.pinned ? "ピン解除" : "ピン留め" }).addEventListener("click", () => {
+		const editButton = detailActions.createEl("button", { text: this.plugin.t("edit") });
+		detailActions.createEl("button", { text: memo.pinned ? this.plugin.t("unpin") : this.plugin.t("pin") }).addEventListener("click", () => {
 			void this.plugin.updateMemoPinned(memo, !memo.pinned);
 		});
-		detailActions.createEl("button", { text: memo.taskStatus === "done" ? "未完了に戻す" : "タスク完了" }).addEventListener("click", () => {
+		detailActions.createEl("button", { text: memo.taskStatus === "done" ? this.plugin.t("backToOpen") : this.plugin.t("completeTask") }).addEventListener("click", () => {
 			void this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "done" ? "open" : "done");
 		});
-		detailActions.createEl("button", { text: memo.taskStatus === "none" ? "タスク化" : "タスク解除" }).addEventListener("click", () => {
+		detailActions.createEl("button", { text: memo.taskStatus === "none" ? this.plugin.t("taskify") : this.plugin.t("untask") }).addEventListener("click", () => {
 			void this.plugin.updateMemoTaskStatus(memo, memo.taskStatus === "none" ? "open" : "none");
 		});
-		const saveButton = actions.createEl("button", { text: "保存" });
-		const cancelButton = actions.createEl("button", { text: "キャンセル" });
+		detailActions.createEl("button", { text: this.plugin.t("openNote") }).addEventListener("click", () => {
+			void this.openMemoNote(memo);
+		});
+		const saveButton = actions.createEl("button", { text: this.plugin.t("save") });
+		const cancelButton = actions.createEl("button", { text: this.plugin.t("cancel") });
 		saveButton.hide();
 		cancelButton.hide();
 
@@ -1024,10 +1467,10 @@ class KotonohaView extends ItemView {
 			detailActions.toggleClass("is-open", !detailActions.hasClass("is-open"));
 			if (detailActions.hasClass("is-open")) {
 				detailActions.show();
-				moreButton.setText("閉じる");
+				moreButton.setText(this.plugin.t("close"));
 			} else {
 				detailActions.hide();
-				moreButton.setText("…");
+				moreButton.setText(this.plugin.t("more"));
 			}
 		});
 
@@ -1053,25 +1496,32 @@ class KotonohaView extends ItemView {
 		});
 
 		if (memo.status !== "archived") {
-			detailActions.createEl("button", { text: "アーカイブ" }).addEventListener("click", () => {
+			detailActions.createEl("button", { text: this.plugin.t("archive") }).addEventListener("click", () => {
 				void this.plugin.updateMemoStatus(memo, "archived");
 			});
 		}
 		if (memo.status !== "active") {
-			detailActions.createEl("button", { text: "復元" }).addEventListener("click", () => {
+			detailActions.createEl("button", { text: this.plugin.t("restore") }).addEventListener("click", () => {
 				void this.plugin.updateMemoStatus(memo, "active");
 			});
 		}
 		if (memo.status !== "deleted") {
-			detailActions.createEl("button", { text: "ゴミ箱" }).addEventListener("click", () => {
+			detailActions.createEl("button", { text: this.plugin.t("trash") }).addEventListener("click", () => {
 				void this.plugin.updateMemoStatus(memo, "deleted");
 			});
 		} else {
-			detailActions.createEl("button", { text: "完全削除" }).addEventListener("click", () => {
-				new ConfirmDeleteMemoModal(this.plugin.app, () => {
+			detailActions.createEl("button", { text: this.plugin.t("deletePermanently") }).addEventListener("click", () => {
+				new ConfirmDeleteMemoModal(this.plugin, () => {
 					void this.plugin.deleteMemoPermanently(memo);
 				}).open();
 			});
+		}
+	}
+
+	async openMemoNote(memo: MemoItem) {
+		const file = this.plugin.app.vault.getAbstractFileByPath(memo.filePath);
+		if (file instanceof TFile) {
+			await this.plugin.app.workspace.getLeaf(false).openFile(file);
 		}
 	}
 
@@ -1122,31 +1572,49 @@ class KotonohaSettingTab extends PluginSettingTab {
 
 		containerEl.createEl("p", {
 			cls: "kotonoha-settings-lead",
-			text: "アイデア、タスク、短い記録をすばやく保存して管理します。",
+			text: this.plugin.t("settingsLead"),
 		});
 
 		const hero = containerEl.createDiv({ cls: "kotonoha-settings-hero" });
 		const heroText = hero.createDiv();
 		heroText.createDiv({ cls: "kotonoha-settings-title", text: "Kotonoha" });
-		heroText.createEl("p", { text: "言の葉を日々のノートに残し、検索、タグ、回顧で見返せます。" });
-		hero.createEl("button", { text: "メモを開く" }).addEventListener("click", () => {
+		heroText.createEl("p", { text: this.plugin.t("settingsHero") });
+		hero.createEl("button", { text: this.plugin.t("openMemo") }).addEventListener("click", () => {
 			void this.plugin.activateView();
 		});
 
-		new Setting(containerEl).setName("機能").setHeading();
-		const features = containerEl.createDiv({ cls: "kotonoha-settings-grid" });
-		createFeatureCard(features, "基本", "メモの保存、編集、削除、復元");
-		createFeatureCard(features, "保存", "保存先フォルダ、日次形式、見出し");
-		createFeatureCard(features, "表示", "検索、タグ、期間、状態フィルタ");
-		createFeatureCard(features, "エディタ", "選択範囲保存、複数行メモ");
-		createFeatureCard(features, "振り返り", "ヒートマップ、ランダム回顧、日次目標");
-		createFeatureCard(features, "添付", "ファイル保存、リンク追加");
+		new Setting(containerEl)
+			.setName(this.plugin.t("languageSetting"))
+			.setDesc(this.plugin.t("languageSettingDesc"))
+			.addDropdown((dropdown) => dropdown
+				.addOption("auto", this.plugin.t("languageAuto"))
+				.addOption("ja", this.plugin.t("languageJapanese"))
+				.addOption("en", this.plugin.t("languageEnglish"))
+				.setValue(this.plugin.settings.language)
+				.onChange(async (value) => {
+					this.plugin.settings.language = normalizeLanguageSetting(value);
+					await this.plugin.saveSettings();
+					this.display();
+					for (const view of this.plugin.getOpenViews()) {
+						await view.render();
+						await view.reload();
+					}
+				}));
 
-		new Setting(containerEl).setName("保存設定").setHeading();
+		new Setting(containerEl).setName(this.plugin.t("featuresHeading")).setHeading();
+		const features = containerEl.createDiv({ cls: "kotonoha-settings-grid" });
+		createFeatureCard(features, this.plugin.t("basicFeature"), this.plugin.t("basicFeatureDesc"));
+		createFeatureCard(features, this.plugin.t("saveFeature"), this.plugin.t("saveFeatureDesc"));
+		createFeatureCard(features, this.plugin.t("displayFeature"), this.plugin.t("displayFeatureDesc"));
+		createFeatureCard(features, this.plugin.t("editorFeature"), this.plugin.t("editorFeatureDesc"));
+		createFeatureCard(features, this.plugin.t("reflectFeature"), this.plugin.t("reflectFeatureDesc"));
+		createFeatureCard(features, this.plugin.t("attachmentFeature"), this.plugin.t("attachmentFeatureDesc"));
+
+		new Setting(containerEl).setName(this.plugin.t("saveSettings")).setHeading();
 
 		new Setting(containerEl)
-			.setName("デイリーノートに保存")
-			.setDesc("有効にすると、指定したデイリーノートファイルの見出し下にメモを追加します。")
+			.setName(this.plugin.t("captureToDailyNote"))
+			.setDesc(this.plugin.t("captureToDailyNoteDesc"))
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.captureToDailyNote)
 				.onChange(async (value) => {
@@ -1155,8 +1623,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("デイリーノート保存先フォルダ")
-			.setDesc("Obsidian のデイリーノート設定がある場合はそちらを優先します。未設定時の fallback です。")
+			.setName(this.plugin.t("dailyNoteFolder"))
+			.setDesc(this.plugin.t("dailyNoteFolderDesc"))
 			.addText((text) => text
 				.setPlaceholder("例: Daily, 01_diary")
 				.setValue(this.plugin.settings.dailyNoteFolder)
@@ -1166,8 +1634,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("デイリーノートのファイル名")
-			.setDesc("Obsidian のデイリーノート設定がある場合はそちらを優先します。Moment.js 形式です。")
+			.setName(this.plugin.t("dailyNoteFileName"))
+			.setDesc(this.plugin.t("dailyNoteFileNameDesc"))
 			.addText((text) => text
 				.setPlaceholder("YYYY-MM-DD")
 				.setValue(this.plugin.settings.dailyNoteFileFormat)
@@ -1177,8 +1645,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("日次ノートの見出し")
-			.setDesc("# や ## は入力不要です。この見出しの下にメモを追加します。")
+			.setName(this.plugin.t("dailyHeading"))
+			.setDesc(this.plugin.t("dailyHeadingDesc"))
 			.addText((text) => text
 				.setPlaceholder("つぶやき")
 				.setValue(this.plugin.settings.dailyHeading)
@@ -1188,8 +1656,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("新しいメモを上に追加")
-			.setDesc("有効にすると、見出しの直下に最新メモを追加します。無効の場合は末尾に追加します。")
+			.setName(this.plugin.t("insertNewMemoAtTop"))
+			.setDesc(this.plugin.t("insertNewMemoAtTopDesc"))
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.insertNewMemoAtTop)
 				.onChange(async (value) => {
@@ -1198,8 +1666,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("月次保存フォルダ")
-			.setDesc("デイリーノート保存を無効にした場合に使う、vault 内の相対フォルダです。")
+			.setName(this.plugin.t("monthlyFolder"))
+			.setDesc(this.plugin.t("monthlyFolderDesc"))
 			.addText((text) => text
 				.setPlaceholder("Kotonoha")
 				.setValue(this.plugin.settings.memoFolder)
@@ -1209,8 +1677,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("添付ファイル保存フォルダ")
-			.setDesc("Kotonoha から添付したファイルを保存する vault 内の相対フォルダです。")
+			.setName(this.plugin.t("attachmentFolder"))
+			.setDesc(this.plugin.t("attachmentFolderDesc"))
 			.addText((text) => text
 				.setPlaceholder("Kotonoha/attachments")
 				.setValue(this.plugin.settings.attachmentFolder)
@@ -1220,8 +1688,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("保存ボタンの表示名")
-			.setDesc("下部入力欄の主ボタンに表示する短い言葉です。")
+			.setName(this.plugin.t("saveButtonLabel"))
+			.setDesc(this.plugin.t("saveButtonLabelDesc"))
 			.addText((text) => text
 				.setPlaceholder("残す")
 				.setValue(this.plugin.settings.saveButtonLabel)
@@ -1234,11 +1702,11 @@ class KotonohaSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(containerEl).setName("表示設定").setHeading();
+		new Setting(containerEl).setName(this.plugin.t("displaySettings")).setHeading();
 
 		new Setting(containerEl)
-			.setName("詳細ツールを表示")
-			.setDesc("検索、絞り込み、統計、ヒートマップ、タグをタイムライン上部に表示します。無効時は書きやすさを優先します。")
+			.setName(this.plugin.t("showAdvancedControls"))
+			.setDesc(this.plugin.t("showAdvancedControlsDesc"))
 			.addToggle((toggle) => toggle
 				.setValue(this.plugin.settings.showAdvancedControls)
 				.onChange(async (value) => {
@@ -1250,11 +1718,11 @@ class KotonohaSettingTab extends PluginSettingTab {
 					}
 				}));
 
-		new Setting(containerEl).setName("振り返り設定").setHeading();
+		new Setting(containerEl).setName(this.plugin.t("reflectSettings")).setHeading();
 
 		new Setting(containerEl)
-			.setName("1日の目標メモ数")
-			.setDesc("今日の進捗バーに使います。")
+			.setName(this.plugin.t("dailyGoal"))
+			.setDesc(this.plugin.t("dailyGoalDesc"))
 			.addText((text) => text
 				.setPlaceholder("5")
 				.setValue(String(this.plugin.settings.dailyGoal))
@@ -1264,8 +1732,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("ランダム回顧の件数")
-			.setDesc("ランダムボタンで表示するメモ数です。")
+			.setName(this.plugin.t("randomReviewCount"))
+			.setDesc(this.plugin.t("randomReviewCountDesc"))
 			.addText((text) => text
 				.setPlaceholder("10")
 				.setValue(String(this.plugin.settings.randomReviewCount))
@@ -1275,8 +1743,8 @@ class KotonohaSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl)
-			.setName("ヒートマップの日数")
-			.setDesc("タイムライン上部に表示する日数です。")
+			.setName(this.plugin.t("heatmapDays"))
+			.setDesc(this.plugin.t("heatmapDaysDesc"))
 			.addText((text) => text
 				.setPlaceholder("42")
 				.setValue(String(this.plugin.settings.heatmapDays))
@@ -1296,22 +1764,24 @@ function createFeatureCard(container: HTMLElement, title: string, description: s
 }
 
 class ConfirmDeleteMemoModal extends Modal {
+	private readonly plugin: KotonohaPlugin;
 	private readonly onConfirm: () => void;
 
-	constructor(app: App, onConfirm: () => void) {
-		super(app);
+	constructor(plugin: KotonohaPlugin, onConfirm: () => void) {
+		super(plugin.app);
+		this.plugin = plugin;
 		this.onConfirm = onConfirm;
 	}
 
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.createDiv({ cls: "kotonoha-modal-title", text: "メモを完全に削除しますか？" });
-		contentEl.createEl("p", { text: "この操作は対象のメモ本文をノートから削除します。" });
+		contentEl.createDiv({ cls: "kotonoha-modal-title", text: this.plugin.t("deleteModalTitle") });
+		contentEl.createEl("p", { text: this.plugin.t("deleteModalDesc") });
 
 		const actions = contentEl.createDiv({ cls: "kotonoha-modal-actions" });
-		actions.createEl("button", { text: "キャンセル" }).addEventListener("click", () => this.close());
-		actions.createEl("button", { text: "削除", cls: "mod-warning" }).addEventListener("click", () => {
+		actions.createEl("button", { text: this.plugin.t("cancel") }).addEventListener("click", () => this.close());
+		actions.createEl("button", { text: this.plugin.t("deleteAction"), cls: "mod-warning" }).addEventListener("click", () => {
 			this.close();
 			this.onConfirm();
 		});
@@ -1465,6 +1935,21 @@ function normalizeButtonLabel(value: unknown, fallback: string): string {
 	return label || fallback;
 }
 
+function normalizeLanguageSetting(value: string | undefined): KotonohaLanguageSetting {
+	if (value === "ja" || value === "en" || value === "auto") return value;
+	return DEFAULT_SETTINGS.language;
+}
+
+function getDisplayLanguage(setting: KotonohaLanguageSetting): KotonohaLanguage {
+	if (setting === "ja" || setting === "en") return setting;
+	return moment.locale().toLowerCase().startsWith("ja") ? "ja" : "en";
+}
+
+function translate(key: TranslationKey, language: KotonohaLanguage, params: Record<string, string | number>): string {
+	const template = TRANSLATIONS[language][key] ?? TRANSLATIONS.en[key] ?? key;
+	return template.replace(/\{(\w+)\}/g, (_match, name: string) => String(params[name] ?? ""));
+}
+
 function normalizeSaveTarget(value: string | undefined): SaveTarget {
 	if (value === "daily" || value === "monthly" || value === "default") return value;
 	return "default";
@@ -1506,12 +1991,12 @@ function isLikelyDailyNotePath(filePath: string, format: string | undefined): bo
 	return /(?:^|\/)\d{4}-\d{2}-\d{2}(?:[_\s-][^/]*)?$/.test(withoutExtension);
 }
 
-function formatDateGroupLabel(date: string): string {
+function formatDateGroupLabel(date: string, language: KotonohaLanguage): string {
 	const day = moment(date, "YYYY-MM-DD");
 	if (!day.isValid()) return date;
-	if (day.isSame(moment(), "day")) return "今日";
-	if (day.isSame(moment().subtract(1, "day"), "day")) return "昨日";
-	return day.format("M月D日 ddd");
+	if (day.isSame(moment(), "day")) return translate("today", language, {});
+	if (day.isSame(moment().subtract(1, "day"), "day")) return translate("yesterday", language, {});
+	return language === "ja" ? day.format("M月D日 ddd") : day.format("MMM D, ddd");
 }
 
 function extractTags(content: string): string[] {
@@ -1558,13 +2043,15 @@ function parseMemoMeta(raw: string): { status: MemoStatus; pinned: boolean; stor
 	return { status: parsed.status, pinned: parsed.pinned, storageId: parsed.storageId };
 }
 
-function serializeMemoBlock(storageId: string, timestampText: string, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus): string {
-	const metaParts: string[] = [`id=${storageId}`];
+function serializeMemoBlock(storageId: string | null, timestampText: string, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus): string {
+	const metaParts: string[] = [];
+	if (storageId) metaParts.push(`id=${storageId}`);
 	if (status !== "active") metaParts.push(`status=${status}`);
 	if (pinned) metaParts.push("pinned=true");
 	const escaped = content.trim().replace(/\n/g, "\n  ");
 	const checkbox = taskStatus === "open" ? "[ ] " : taskStatus === "done" ? "[x] " : "";
-	return `- ${checkbox}${timestampText} ${escaped}\n  %% kotonoha:${metaParts.join(";")} %%`;
+	const memoLine = `- ${checkbox}${timestampText} ${escaped}`;
+	return metaParts.length > 0 ? `${memoLine}\n  %% kotonoha:${metaParts.join(";")} %%` : memoLine;
 }
 
 function memoId(filePath: string, startLine: number, createdAt: string): string {
@@ -1666,6 +2153,22 @@ function findCurrentMemo(raw: string, memo: MemoItem, heading: string | null): M
 		candidate.pinned === memo.pinned
 	);
 	return matches.length === 1 ? matches[0] : null;
+}
+
+function removeRedundantMetadata(raw: string, heading: string | null): string {
+	const lines = raw.split(/\r?\n/);
+	const range = heading ? getHeadingSectionRange(lines, heading) : { start: 0, end: lines.length };
+	if (!range) return raw;
+
+	for (let index = range.end - 1; index >= range.start; index -= 1) {
+		const match = lines[index].match(META_LINE_RE);
+		if (!match) continue;
+		const body = match[1];
+		if (body.includes("status=") || body.includes("pinned=true")) continue;
+		lines.splice(index, 1);
+	}
+
+	return lines.join("\n");
 }
 
 function upsertUnderHeading(raw: string, heading: string, memoLine: string, insertAtTop: boolean): string {

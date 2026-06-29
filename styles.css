@@ -76,6 +76,12 @@
   background: var(--interactive-accent);
 }
 
+.kotonoha-primary-button:disabled,
+.kotonoha-primary-button.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .kotonoha-actions button.is-active {
   color: var(--text-on-accent);
   background: var(--interactive-accent);
@@ -92,6 +98,11 @@
 }
 
 .kotonoha-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.kotonoha-target-line {
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
 }
@@ -353,6 +364,21 @@
   font-size: var(--font-ui-smaller);
 }
 
+.kotonoha-open-note-link {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.kotonoha-open-note-link:hover,
+.kotonoha-open-note-link:focus-visible {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
 .kotonoha-content-row {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -453,8 +479,22 @@
 }
 
 .kotonoha-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   color: var(--text-muted);
-  padding: 12px 0;
+  padding: 18px 0;
+}
+
+.kotonoha-empty-title {
+  max-width: 34em;
+  line-height: 1.55;
+}
+
+.kotonoha-empty button {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
 }
 
 .kotonoha-settings-lead {
