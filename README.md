@@ -16,6 +16,20 @@ The name comes from the Japanese word `言の葉` (`kotonoha`), an older express
 
 ![Kotonoha timeline review](assets/kotonoha-timeline.png)
 
+## Demo videos
+
+English:
+
+<video src="assets/kotonoha-demo-en.mp4" controls width="720"></video>
+
+[Open English demo](assets/kotonoha-demo-en.mp4)
+
+Japanese:
+
+<video src="assets/kotonoha-demo-ja.mp4" controls width="720"></video>
+
+[Open Japanese demo](assets/kotonoha-demo-ja.mp4)
+
 ## Features
 
 - Append notes to Daily Notes
@@ -29,6 +43,9 @@ The name comes from the Japanese word `言の葉` (`kotonoha`), an older express
 ## Install
 
 After Kotonoha is listed in Community Plugins, search for `Kotonoha` in Obsidian settings and install it.
+
+- [Kotonoha in the Obsidian plugin directory](https://obsidian.md/plugins?id=kotonoha)
+- [Open Kotonoha in Obsidian](obsidian://show-plugin?id=kotonoha)
 
 To install manually, download these files from the latest release and place them in `.obsidian/plugins/kotonoha/` in your vault:
 
