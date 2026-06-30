@@ -20,11 +20,15 @@ The name comes from the Japanese word `言の葉` (`kotonoha`), an older express
 
 English:
 
-[![Open English demo](assets/kotonoha-demo-en.png)](assets/kotonoha-demo-en.mp4)
+![Kotonoha English demo](assets/kotonoha-demo-en.gif)
+
+[Open English MP4](assets/kotonoha-demo-en.mp4)
 
 Japanese:
 
-[![Open Japanese demo](assets/kotonoha-demo-ja.png)](assets/kotonoha-demo-ja.mp4)
+![Kotonoha Japanese demo](assets/kotonoha-demo-ja.gif)
+
+[Open Japanese MP4](assets/kotonoha-demo-ja.mp4)
 
 ## Features
 
