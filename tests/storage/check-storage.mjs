@@ -59,6 +59,9 @@ assert.match(serialized, /status=archived/);
 assert.match(serialized, /pinned=true/);
 assert.match(serialized, /\n  %% kotonoha:id=memo-1;status=archived;pinned=true %%$/);
 
+const activeSerialized = serializeMemoBlock("memo-active", "09:10", "通常表示", "active", false, "none");
+assert.equal(activeSerialized, "- 09:10 通常表示");
+
 const childMetaNote = [
   "# Daily",
   "## つぶやき",

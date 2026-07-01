@@ -808,7 +808,7 @@ export default class KotonohaPlugin extends Plugin {
 				if (!target) throw new Error(this.t("safeTargetError"));
 				const lines = raw.split(/\r?\n/);
 				const needsMetadata = status !== "active" || pinned;
-				const storageId = needsMetadata ? target.storageId ?? memo.storageId ?? generateMemoId() : target.storageId ?? memo.storageId;
+				const storageId = needsMetadata ? target.storageId ?? memo.storageId ?? generateMemoId() : null;
 				updatedStorageId = storageId;
 				const nextCreatedAt = /^\d{4}-\d{2}-\d{2}\s+/.test(target.timestampText)
 					? target.timestampText
@@ -2049,7 +2049,8 @@ function parseMemoMeta(raw: string): { status: MemoStatus; pinned: boolean; stor
 
 function serializeMemoBlock(storageId: string | null, timestampText: string, content: string, status: MemoStatus, pinned: boolean, taskStatus: TaskStatus): string {
 	const metaParts: string[] = [];
-	if (storageId) metaParts.push(`id=${storageId}`);
+	const needsMetadata = status !== "active" || pinned;
+	if (storageId && needsMetadata) metaParts.push(`id=${storageId}`);
 	if (status !== "active") metaParts.push(`status=${status}`);
 	if (pinned) metaParts.push("pinned=true");
 	const escaped = content.trim().replace(/\n/g, "\n  ");
