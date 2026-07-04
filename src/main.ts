@@ -2176,30 +2176,33 @@ function removeRedundantMetadata(raw: string, heading: string | null): string {
 	return lines.join("\n");
 }
 
+function findLastMemoInsertIndex(lines: string[], range: { start: number; end: number }): number {
+	let insertAt = range.start;
+	for (let index = range.start; index < range.end; index += 1) {
+		const match = lines[index].match(/^- (?:\[([ xX])\] )?(?:(\d{4}-\d{2}-\d{2})\s+)?(\d{1,2}:\d{2})\s+(.+)$/);
+		if (!match) continue;
+		let cursor = index + 1;
+		while (cursor < range.end && lines[cursor].startsWith("  ")) {
+			cursor += 1;
+		}
+		insertAt = cursor;
+		index = cursor - 1;
+	}
+	return insertAt;
+}
+
 function upsertUnderHeading(raw: string, heading: string, memoLine: string, insertAtTop: boolean): string {
 	const title = normalizeHeadingText(heading) || DEFAULT_SETTINGS.dailyHeading;
 	const headingLine = `## ${title}`;
 	const lines = raw.split(/\r?\n/);
-	const headingIndex = lines.findIndex((line) => normalizeMarkdownHeading(line) === title);
+	const range = getHeadingSectionRange(lines, title);
 
-	if (headingIndex === -1) {
+	if (!range) {
 		const prefix = raw.endsWith("\n") ? raw : `${raw}\n`;
 		return `${prefix}\n${headingLine}\n${memoLine}\n`;
 	}
 
-	if (insertAtTop) {
-		lines.splice(headingIndex + 1, 0, memoLine);
-		return lines.join("\n");
-	}
-
-	let insertAt = lines.length;
-	for (let index = headingIndex + 1; index < lines.length; index += 1) {
-		if (/^#{1,6}\s+/.test(lines[index])) {
-			insertAt = index;
-			break;
-		}
-	}
-
+	const insertAt = insertAtTop ? range.start : findLastMemoInsertIndex(lines, range);
 	lines.splice(insertAt, 0, memoLine);
 	return lines.join("\n");
 }
