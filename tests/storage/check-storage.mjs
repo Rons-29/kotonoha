@@ -86,7 +86,21 @@ const duplicatedLegacy = `${legacyNote}\n- 11:00 旧形式`;
 assert.equal(findCurrentMemo(duplicatedLegacy, legacy, "つぶやき"), null);
 
 const inserted = upsertUnderHeading("# Daily\n\n## つぶやき\n- 08:00 既存\n\n## 次", "つぶやき", "- 09:00 新規", false);
-assert.match(inserted, /- 08:00 既存\n\n- 09:00 新規\n## 次/);
+assert.match(inserted, /- 08:00 既存\n- 09:00 新規\n\n## 次/);
+
+const noteWithDataview = [
+  "## つぶやき",
+  "- 11:09 既存",
+  "",
+  "```dataview",
+  "LIST",
+  "```",
+].join("\n");
+const appendedBeforeDataview = upsertUnderHeading(noteWithDataview, "つぶやき", "- 11:28 新規", false);
+assert.match(appendedBeforeDataview, /- 11:09 既存\n- 11:28 新規\n\n```dataview/);
+
+const prepended = upsertUnderHeading(noteWithDataview, "つぶやき", "- 11:25 新規", true);
+assert.match(prepended, /## つぶやき\n- 11:25 新規\n- 11:09 既存/);
 
 assert.equal(isLikelyDailyNotePath("2026-06-21.md", "YYYY-MM-DD"), true);
 assert.equal(isLikelyDailyNotePath("01_diary/2026/2026-06-21_日.md", "YYYY-MM-DD_ddd"), true);
