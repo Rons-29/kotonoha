@@ -21,6 +21,7 @@ await build({
 
 const {
   findCurrentMemo,
+  isCaptureSaveShortcut,
   isLikelyDailyNotePath,
   normalizeFolder,
   normalizeOptionalFolder,
@@ -28,6 +29,12 @@ const {
   serializeMemoBlock,
   upsertUnderHeading,
 } = await import(`${pathToFileURL(output).href}?v=${Date.now()}`);
+
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: true, ctrlKey: false, altKey: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: true, altKey: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }), false);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: true }), false);
 
 const note = [
   "# 2026-06-21",
