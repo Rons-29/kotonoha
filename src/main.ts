@@ -152,7 +152,7 @@ const TRANSLATIONS = {
 		reflectToday: "今日",
 		reflectSevenDaysAgo: "7日前",
 		reload: "再読み込み",
-		hint: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Cmd/Ctrl+Enter: 保存",
+		hint: "タスク: 未完了タスクとして保存 / 添付: vault に保存してリンク追加 / Shift+Enter: 保存",
 		noReviewMemos: "表示できるメモがありません。",
 		emptyNoMemos: "まだ言の葉はありません。今日のひとことを残してみましょう。",
 		emptyFiltered: "この条件に合う言の葉はありません。",
@@ -311,7 +311,7 @@ const TRANSLATIONS = {
 		reflectToday: "Today",
 		reflectSevenDaysAgo: "7 days ago",
 		reload: "Reload",
-		hint: "Task: save as an open task / Attach: save to the vault and add links / Cmd/Ctrl+Enter: save",
+		hint: "Task: save as an open task / Attach: save to the vault and add links / Shift+Enter: save",
 		noReviewMemos: "No memos to show.",
 		emptyNoMemos: "No words saved yet. Capture a thought for today.",
 		emptyFiltered: "No notes match these filters.",
@@ -420,10 +420,11 @@ type TranslationKey = keyof typeof TRANSLATIONS.ja;
 export default class KotonohaPlugin extends Plugin {
 	settings: KotonohaSettings = DEFAULT_SETTINGS;
 	dailyNotesSettings: DailyNotesSettings | null = null;
+	dailyNotesSettingsMtime: number | null = null;
 
 	async onload() {
 		await this.loadSettings();
-		this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
+		await this.ensureDailyNotesSettings();
 
 		this.registerView(
 			VIEW_TYPE_LOCAL_THINO,
@@ -629,7 +630,7 @@ export default class KotonohaPlugin extends Plugin {
 		}
 
 		new Notice(result.target === "daily" ? this.t("savedDaily") : this.t("savedMonthly"));
-		this.refreshOpenViews();
+		this.refreshOpenViews(result.path);
 		return result;
 	}
 
@@ -666,15 +667,15 @@ export default class KotonohaPlugin extends Plugin {
 	async appendToDailyNote(content: string, forcedTaskStatus?: TaskStatus): Promise<CaptureResult> {
 		const dailyNote = await this.resolveDailyNote();
 		const file = await getOrCreateFile(this.app, dailyNote.path, dailyNote.initialContent);
-		const raw = await this.app.vault.read(file);
-		const updated = upsertUnderHeading(raw, this.settings.dailyHeading, this.formatMemoLine(content, false, forcedTaskStatus), this.settings.insertNewMemoAtTop);
-		await this.app.vault.modify(file, updated);
+		const memoLine = this.formatMemoLine(content, false, forcedTaskStatus);
+		await this.app.vault.process(file, (raw) =>
+			upsertUnderHeading(raw, this.settings.dailyHeading, memoLine, this.settings.insertNewMemoAtTop)
+		);
 		return { path: dailyNote.path, target: "daily" };
 	}
 
 	async resolveDailyNote(): Promise<{ path: string; initialContent: string }> {
-		const dailyNotes = await loadCoreDailyNotesSettings(this.app);
-		this.dailyNotesSettings = dailyNotes;
+		const dailyNotes = await this.ensureDailyNotesSettings();
 		const format = (dailyNotes?.format || this.settings.dailyNoteFileFormat || DEFAULT_SETTINGS.dailyNoteFileFormat).trim();
 		const folder = normalizeOptionalFolder(dailyNotes?.folder ?? this.settings.dailyNoteFolder);
 		const fileName = moment().format(format || DEFAULT_SETTINGS.dailyNoteFileFormat);
@@ -707,6 +708,24 @@ export default class KotonohaPlugin extends Plugin {
 		return serializeMemoBlock(null, `${date}${time}`.trim(), escaped, "active", false, taskStatus);
 	}
 
+	async ensureDailyNotesSettings(): Promise<DailyNotesSettings | null> {
+		const configPath = normalizePath(`${this.app.vault.configDir}/daily-notes.json`);
+		let mtime = 0;
+		try {
+			if (await this.app.vault.adapter.exists(configPath)) {
+				mtime = (await this.app.vault.adapter.stat(configPath))?.mtime ?? 0;
+			}
+		} catch {
+			mtime = 0;
+		}
+		if (this.dailyNotesSettingsMtime === mtime) {
+			return this.dailyNotesSettings;
+		}
+		this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
+		this.dailyNotesSettingsMtime = mtime;
+		return this.dailyNotesSettings;
+	}
+
 	async loadMemos(): Promise<MemoItem[]> {
 		const files = await this.getSourceFiles();
 		const all = await Promise.all(files.map((file) => this.loadMemosFromFile(file)));
@@ -714,6 +733,7 @@ export default class KotonohaPlugin extends Plugin {
 	}
 
 	async getSourceFiles(): Promise<TFile[]> {
+		await this.ensureDailyNotesSettings();
 		const fallbackFolder = normalizeFolder(this.settings.memoFolder);
 		if (!this.settings.captureToDailyNote) {
 			return listMarkdownFilesInFolder(this.app, fallbackFolder);
@@ -736,29 +756,33 @@ export default class KotonohaPlugin extends Plugin {
 		);
 	}
 
+	async isTrackedSourceFile(filePath: string): Promise<boolean> {
+		return shouldReloadChangedFile(filePath, (await this.getSourceFiles()).map((file) => file.path));
+	}
+
 	async updateMemoContent(memo: MemoItem, content: string) {
 		if (await this.replaceMemoBlock(memo, content.trim(), memo.status, memo.pinned, memo.taskStatus, this.t("memoUpdated"))) {
-			this.refreshOpenViews();
+			this.refreshOpenViews(memo.filePath);
 		}
 	}
 
 	async updateMemoStatus(memo: MemoItem, status: MemoStatus) {
 		const label = status === "archived" ? this.t("archivedNotice") : status === "deleted" ? this.t("trashedNotice") : this.t("restoredNotice");
 		if (await this.replaceMemoBlock(memo, memo.content, status, memo.pinned, memo.taskStatus, label)) {
-			this.refreshOpenViews();
+			this.refreshOpenViews(memo.filePath);
 		}
 	}
 
 	async updateMemoPinned(memo: MemoItem, pinned: boolean) {
 		if (await this.replaceMemoBlock(memo, memo.content, memo.status, pinned, memo.taskStatus, pinned ? this.t("pinnedNotice") : this.t("unpinnedNotice"))) {
-			this.refreshOpenViews();
+			this.refreshOpenViews(memo.filePath);
 		}
 	}
 
 	async updateMemoTaskStatus(memo: MemoItem, taskStatus: TaskStatus) {
 		const label = taskStatus === "done" ? this.t("taskDoneNotice") : taskStatus === "open" ? this.t("taskOpenNotice") : this.t("taskNoneNotice");
 		if (await this.replaceMemoBlock(memo, memo.content, memo.status, memo.pinned, taskStatus, label)) {
-			this.refreshOpenViews();
+			this.refreshOpenViews(memo.filePath);
 		}
 	}
 
@@ -785,8 +809,8 @@ export default class KotonohaPlugin extends Plugin {
 					lines.splice(Math.min(deletedStartLine, lines.length), 0, ...deletedBlock);
 					return lines.join("\n");
 				});
-			});
-			this.refreshOpenViews();
+			}, memo.filePath);
+			this.refreshOpenViews(memo.filePath);
 		} catch (error) {
 			new Notice(error instanceof Error ? error.message : this.t("deleteFailed"));
 		}
@@ -841,7 +865,7 @@ export default class KotonohaPlugin extends Plugin {
 					lines.splice(current.startLine, current.endLine - current.startLine + 1, ...previousBlock);
 					return lines.join("\n");
 				});
-			});
+			}, memo.filePath);
 			return true;
 		} catch (error) {
 			new Notice(error instanceof Error ? error.message : this.t("updateFailed"));
@@ -849,7 +873,7 @@ export default class KotonohaPlugin extends Plugin {
 		}
 	}
 
-	showUndoNotice(message: string, undo: () => Promise<void>) {
+	showUndoNotice(message: string, undo: () => Promise<void>, changedFilePath?: string) {
 		const notice = new Notice(message, 7000);
 		const undoButton = notice.messageEl.createEl("button", { text: this.t("undo") });
 		undoButton.addEventListener("click", () => {
@@ -857,7 +881,7 @@ export default class KotonohaPlugin extends Plugin {
 				try {
 					await undo();
 					notice.hide();
-					this.refreshOpenViews();
+					this.refreshOpenViews(changedFilePath);
 					new Notice(this.t("undone"));
 				} catch (error) {
 					new Notice(error instanceof Error ? error.message : this.t("undoFailed"));
@@ -866,8 +890,14 @@ export default class KotonohaPlugin extends Plugin {
 		});
 	}
 
-	refreshOpenViews() {
-		this.getOpenViews().forEach((view) => void view.reload());
+	refreshOpenViews(changedFilePath?: string) {
+		this.getOpenViews().forEach((view) => {
+			if (changedFilePath) {
+				void view.reloadFile(changedFilePath);
+			} else {
+				void view.reload();
+			}
+		});
 	}
 
 	getOpenViews(): KotonohaView[] {
@@ -895,6 +925,7 @@ class KotonohaView extends ItemView {
 	inputEl: HTMLTextAreaElement | null = null;
 	searchEl: HTMLInputElement | null = null;
 	draftSaveTimer: number | null = null;
+	captureSaveInProgress = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: KotonohaPlugin) {
 		super(leaf);
@@ -927,6 +958,23 @@ class KotonohaView extends ItemView {
 
 	async reload() {
 		this.memos = await this.plugin.loadMemos();
+		await this.renderList();
+	}
+
+	async reloadFile(filePath: string) {
+		if (!(await this.plugin.isTrackedSourceFile(filePath))) {
+			return;
+		}
+		const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
+		if (!(file instanceof TFile)) {
+			await this.reload();
+			return;
+		}
+		const updatedMemos = await this.plugin.loadMemosFromFile(file);
+		this.memos = [
+			...this.memos.filter((memo) => memo.filePath !== filePath),
+			...updatedMemos,
+		].sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.createdTime - a.createdTime || b.id.localeCompare(a.id));
 		await this.renderList();
 	}
 
@@ -1042,6 +1090,8 @@ class KotonohaView extends ItemView {
 		};
 
 		const saveCapture = async () => {
+			if (this.captureSaveInProgress) return;
+			this.captureSaveInProgress = true;
 			try {
 				const attachments = await this.plugin.saveAttachments(this.attachmentFiles);
 				const content = [input.value.trim(), ...attachments.links].filter(Boolean).join("\n");
@@ -1058,6 +1108,9 @@ class KotonohaView extends ItemView {
 				updateCaptureButtons();
 			} catch (error) {
 				new Notice(error instanceof Error ? this.plugin.t("attachmentSaveFailed", { message: error.message }) : this.plugin.t("attachmentSaveFailedGeneric"));
+			} finally {
+				this.captureSaveInProgress = false;
+				updateCaptureButtons();
 			}
 		};
 
@@ -1079,7 +1132,7 @@ class KotonohaView extends ItemView {
 			this.scheduleDraftSave();
 		});
 		input.addEventListener("keydown", (event) => {
-			if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+			if (isCaptureSaveShortcut(event)) {
 				event.preventDefault();
 				void saveCapture();
 			}
@@ -1127,7 +1180,15 @@ class KotonohaView extends ItemView {
 	}
 
 	async persistDraft() {
-		this.plugin.settings.draftContent = this.inputEl?.value ?? this.plugin.settings.draftContent;
+		const nextContent = this.inputEl?.value ?? this.plugin.settings.draftContent;
+		if (
+			nextContent === this.plugin.settings.draftContent &&
+			this.taskCapture === this.plugin.settings.draftTaskCapture &&
+			this.saveTarget === this.plugin.settings.draftSaveTarget
+		) {
+			return;
+		}
+		this.plugin.settings.draftContent = nextContent;
 		this.plugin.settings.draftTaskCapture = this.taskCapture;
 		this.plugin.settings.draftSaveTarget = this.saveTarget;
 		await this.plugin.saveSettings();
@@ -2213,12 +2274,25 @@ function normalizeMarkdownHeading(line: string): string | null {
 	return normalizeHeadingText(match[1]);
 }
 
+function isCaptureSaveShortcut(event: Pick<KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey" | "isComposing">): boolean {
+	if (event.isComposing) return false;
+	if (event.key !== "Enter" || event.altKey) return false;
+	if (event.shiftKey) return true;
+	return event.metaKey || event.ctrlKey;
+}
+
+function shouldReloadChangedFile(filePath: string, sourceFilePaths: readonly string[]): boolean {
+	return sourceFilePaths.includes(filePath);
+}
+
 export {
 	findCurrentMemo,
+	isCaptureSaveShortcut,
 	isLikelyDailyNotePath,
 	parseMemoItems,
 	normalizeFolder,
 	normalizeOptionalFolder,
 	serializeMemoBlock,
+	shouldReloadChangedFile,
 	upsertUnderHeading,
 };
