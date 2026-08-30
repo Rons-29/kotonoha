@@ -925,6 +925,7 @@ class KotonohaView extends ItemView {
 	inputEl: HTMLTextAreaElement | null = null;
 	searchEl: HTMLInputElement | null = null;
 	draftSaveTimer: number | null = null;
+	captureSaveInProgress = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: KotonohaPlugin) {
 		super(leaf);
@@ -1089,6 +1090,8 @@ class KotonohaView extends ItemView {
 		};
 
 		const saveCapture = async () => {
+			if (this.captureSaveInProgress) return;
+			this.captureSaveInProgress = true;
 			try {
 				const attachments = await this.plugin.saveAttachments(this.attachmentFiles);
 				const content = [input.value.trim(), ...attachments.links].filter(Boolean).join("\n");
@@ -1105,6 +1108,9 @@ class KotonohaView extends ItemView {
 				updateCaptureButtons();
 			} catch (error) {
 				new Notice(error instanceof Error ? this.plugin.t("attachmentSaveFailed", { message: error.message }) : this.plugin.t("attachmentSaveFailedGeneric"));
+			} finally {
+				this.captureSaveInProgress = false;
+				updateCaptureButtons();
 			}
 		};
 
