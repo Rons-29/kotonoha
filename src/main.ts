@@ -420,10 +420,11 @@ type TranslationKey = keyof typeof TRANSLATIONS.ja;
 export default class KotonohaPlugin extends Plugin {
 	settings: KotonohaSettings = DEFAULT_SETTINGS;
 	dailyNotesSettings: DailyNotesSettings | null = null;
+	dailyNotesSettingsMtime: number | null = null;
 
 	async onload() {
 		await this.loadSettings();
-		this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
+		await this.ensureDailyNotesSettings();
 
 		this.registerView(
 			VIEW_TYPE_LOCAL_THINO,
@@ -674,10 +675,7 @@ export default class KotonohaPlugin extends Plugin {
 	}
 
 	async resolveDailyNote(): Promise<{ path: string; initialContent: string }> {
-		if (!this.dailyNotesSettings) {
-			this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
-		}
-		const dailyNotes = this.dailyNotesSettings;
+		const dailyNotes = await this.ensureDailyNotesSettings();
 		const format = (dailyNotes?.format || this.settings.dailyNoteFileFormat || DEFAULT_SETTINGS.dailyNoteFileFormat).trim();
 		const folder = normalizeOptionalFolder(dailyNotes?.folder ?? this.settings.dailyNoteFolder);
 		const fileName = moment().format(format || DEFAULT_SETTINGS.dailyNoteFileFormat);
@@ -710,6 +708,24 @@ export default class KotonohaPlugin extends Plugin {
 		return serializeMemoBlock(null, `${date}${time}`.trim(), escaped, "active", false, taskStatus);
 	}
 
+	async ensureDailyNotesSettings(): Promise<DailyNotesSettings | null> {
+		const configPath = normalizePath(`${this.app.vault.configDir}/daily-notes.json`);
+		let mtime = 0;
+		try {
+			if (await this.app.vault.adapter.exists(configPath)) {
+				mtime = (await this.app.vault.adapter.stat(configPath))?.mtime ?? 0;
+			}
+		} catch {
+			mtime = 0;
+		}
+		if (this.dailyNotesSettingsMtime === mtime) {
+			return this.dailyNotesSettings;
+		}
+		this.dailyNotesSettings = await loadCoreDailyNotesSettings(this.app);
+		this.dailyNotesSettingsMtime = mtime;
+		return this.dailyNotesSettings;
+	}
+
 	async loadMemos(): Promise<MemoItem[]> {
 		const files = await this.getSourceFiles();
 		const all = await Promise.all(files.map((file) => this.loadMemosFromFile(file)));
@@ -717,6 +733,7 @@ export default class KotonohaPlugin extends Plugin {
 	}
 
 	async getSourceFiles(): Promise<TFile[]> {
+		await this.ensureDailyNotesSettings();
 		const fallbackFolder = normalizeFolder(this.settings.memoFolder);
 		if (!this.settings.captureToDailyNote) {
 			return listMarkdownFilesInFolder(this.app, fallbackFolder);
@@ -737,6 +754,10 @@ export default class KotonohaPlugin extends Plugin {
 			file.path,
 			this.settings.captureToDailyNote ? this.settings.dailyHeading : null
 		);
+	}
+
+	async isTrackedSourceFile(filePath: string): Promise<boolean> {
+		return shouldReloadChangedFile(filePath, (await this.getSourceFiles()).map((file) => file.path));
 	}
 
 	async updateMemoContent(memo: MemoItem, content: string) {
@@ -940,6 +961,9 @@ class KotonohaView extends ItemView {
 	}
 
 	async reloadFile(filePath: string) {
+		if (!(await this.plugin.isTrackedSourceFile(filePath))) {
+			return;
+		}
 		const file = this.plugin.app.vault.getAbstractFileByPath(filePath);
 		if (!(file instanceof TFile)) {
 			await this.reload();
@@ -2244,10 +2268,15 @@ function normalizeMarkdownHeading(line: string): string | null {
 	return normalizeHeadingText(match[1]);
 }
 
-function isCaptureSaveShortcut(event: Pick<KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey">): boolean {
+function isCaptureSaveShortcut(event: Pick<KeyboardEvent, "key" | "shiftKey" | "metaKey" | "ctrlKey" | "altKey" | "isComposing">): boolean {
+	if (event.isComposing) return false;
 	if (event.key !== "Enter" || event.altKey) return false;
 	if (event.shiftKey) return true;
 	return event.metaKey || event.ctrlKey;
+}
+
+function shouldReloadChangedFile(filePath: string, sourceFilePaths: readonly string[]): boolean {
+	return sourceFilePaths.includes(filePath);
 }
 
 export {
@@ -2258,5 +2287,6 @@ export {
 	normalizeFolder,
 	normalizeOptionalFolder,
 	serializeMemoBlock,
+	shouldReloadChangedFile,
 	upsertUnderHeading,
 };

@@ -27,14 +27,19 @@ const {
   normalizeOptionalFolder,
   parseMemoItems,
   serializeMemoBlock,
+  shouldReloadChangedFile,
   upsertUnderHeading,
 } = await import(`${pathToFileURL(output).href}?v=${Date.now()}`);
 
-assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: false }), true);
-assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: true, ctrlKey: false, altKey: false }), true);
-assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: true, altKey: false }), true);
-assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false }), false);
-assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: true }), false);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: false, isComposing: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: false, isComposing: true }), false);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: true, ctrlKey: false, altKey: false, isComposing: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: true, altKey: false, isComposing: false }), true);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, isComposing: false }), false);
+assert.equal(isCaptureSaveShortcut({ key: "Enter", shiftKey: true, metaKey: false, ctrlKey: false, altKey: true, isComposing: false }), false);
+
+assert.equal(shouldReloadChangedFile("Daily/2026-06-21.md", ["Daily/2026-06-21.md"]), true);
+assert.equal(shouldReloadChangedFile("Daily/2026-06-21.md", ["Kotonoha/2026-06.md"]), false);
 
 const note = [
   "# 2026-06-21",
