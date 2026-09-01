@@ -36,6 +36,14 @@ npm run release:check -- <version>
 
 `npm run ui:check` captures a mobile layout screenshot when Chrome or Chromium is available.
 
+For browser-click feedback loops (Artifact Share local preview), see [tests/ui/README.md](tests/ui/README.md). Quick start:
+
+```bash
+npm run ui:preview
+```
+
+Requires Node.js 22.19+. Agents poll with `artifactshare preview next ./tests/ui/kotonoha-mobile.html --wait 90 --json` and report with `preview done --stdin`.
+
 ## Release
 
 1. Update `manifest.json`, `package.json`, and `versions.json`.
